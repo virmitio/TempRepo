@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Management;
 using VMProvisioningAgent;
 
 namespace WinImpl
@@ -31,6 +32,15 @@ namespace WinImpl
             {
                 
             }
+
+            ManagementObject SvcObj = Utility.GetServiceObject(Utility.GetScope(), Utility.ServiceNames.ImageManagement);
+            int result = Utility.WaitForJob((ManagementObject)SvcObj.InvokeMethod("Mount", new object[] { VHD }));
+            if (result != 0)
+            {
+                Status = false;
+                return null;
+            }
+
 
             throw new NotImplementedException();
         }

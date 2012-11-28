@@ -264,7 +264,7 @@ namespace VMProvisioningAgent
 
         }
 
-        private static int WaitForJob(ManagementObject Job)
+        public static int WaitForJob(ManagementObject Job)
         {
             try
             {
