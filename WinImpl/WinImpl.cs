@@ -9,6 +9,14 @@ namespace WinImpl
 {
     public class WinImpl : IProvisioner
     {
+        private static class DiskStrings
+        {
+            public const string MountedStorage = "MSVM_MountedStorageImage";
+            public const string DiskDrive = "Win32_DiskDrive";
+            public const string DiskPartition = "Win32_DiskPartition";
+            public const string LogicalDisk = "Win32_LogicalDisk";
+        }
+
         public string[] MountVHD(out bool Status, string VHD, string ProxyVM, string AlternateInterface)
         {
             if (AlternateInterface != null)
@@ -30,7 +38,8 @@ namespace WinImpl
 
             if (ProxyVM != null)
             {
-                
+
+                //TODO: Mount to VM, then report location (if possible?)
             }
 
             ManagementObject SvcObj = Utility.GetServiceObject(Utility.GetScope(), Utility.ServiceNames.ImageManagement);
@@ -40,9 +49,27 @@ namespace WinImpl
                 Status = false;
                 return null;
             }
+            
+            List<string> ret = new List<string>();
+            var image = new ManagementObjectSearcher(Utility.GetScope(), new SelectQuery(DiskStrings.MountedStorage)).Get()
+                            .Cast<ManagementObject>()
+                            .Where(Obj => (Obj["Name"].ToString().Equals(VHD, StringComparison.InvariantCultureIgnoreCase)))
+                            .FirstOrDefault();
+            var baseScope = new ManagementScope(@"root\cimv2");
+            var disk = new ManagementObjectSearcher(baseScope,
+                                                    new SelectQuery(DiskStrings.DiskDrive,
+                                                                    "SCSILogicalUnit=" + image["Lun"] +
+                                                                    " and SCSIPort=" + image["PortNumber"] +
+                                                                    " and SCSITargetID=" + image["TargetID"]))
+                .Get().Cast<ManagementObject>().FirstOrDefault();
+            var parts = disk.GetRelated(DiskStrings.DiskPartition);
+            foreach (var drives in from ManagementObject part in parts select part.GetRelated(DiskStrings.LogicalDisk))
+            {
+                ret.AddRange(from ManagementObject drive in drives select drive["DeviceID"].ToString());
+            }
 
-
-            throw new NotImplementedException();
+            Status = true;
+            return ret.ToArray();
         }
 
         public bool UnmountVHD(string VHD, string ProxyVM, string AlternateInterface)

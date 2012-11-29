@@ -102,13 +102,13 @@ namespace VMProvisioningAgent
             public const string ImageManagement = "MSVM_ImageManagementService";
         }
 
-        public static IList<ManagementObject> GetVM(string VMName = null, string VMID = null, string Server = null)
+        public static IEnumerable<ManagementObject> GetVM(string VMName = null, string VMID = null, string Server = null)
         {
             ManagementScope scope = GetScope(Server);
             return GetVM(scope, VMName, VMID);
         }
 
-        public static IList<ManagementObject> GetVM(ManagementScope scope, string VMName = null, string VMID = null)
+        public static IEnumerable<ManagementObject> GetVM(ManagementScope scope, string VMName = null, string VMID = null)
         {
             VMID = VMID ?? "%";
             var VMs = new ManagementObjectSearcher(scope,
@@ -120,14 +120,15 @@ namespace VMProvisioningAgent
             return VMs.Get().Cast<ManagementObject>().ToList();
         }
 
-        public static IList<string> GetVHDs(this ManagementObject VM)
+        public static IEnumerable<string> GetVHDs(this ManagementObject VM)
         {
             List<string> vhds = new List<string>();
             switch (VM["__CLASS"].ToString().ToUpperInvariant())
             {
                 case "MSVM_COMPUTERSYSTEM":
                 case "MSVM_VIRTUALSYSTEMSETTINGDATA":
-                    vhds.AddRange(VM.GetDevices().Filter("ElementName", "Hard Disk Image").Select(HD => ((String[]) (HD["Connection"])).First()));
+                    vhds.AddRange(VM.GetDevices().Where(Dev => (Dev["ElementName"].ToString().Equals(
+                        "Hard Disk Image"))).Select(HD => ((String[]) (HD["Connection"])).First()));
                     break;
                 case "MSVM_RESOURCEALLOCATIONSETTINGDATA":
                     if (VM["ElementName"].ToString().Equals("Hard Disk Image",StringComparison.InvariantCultureIgnoreCase))
@@ -157,7 +158,7 @@ namespace VMProvisioningAgent
             return null;
         }
 
-        public static IList<ManagementObject> GetDevices(this ManagementObject VM)
+        public static IEnumerable<ManagementObject> GetDevices(this ManagementObject VM)
         {
             switch (VM["__CLASS"].ToString().ToUpperInvariant())
             {
@@ -165,20 +166,18 @@ namespace VMProvisioningAgent
                     return
                         VM.GetSettings()
                         .GetRelated("MSVM_ResourceAllocationSettingData")
-                        .Cast<ManagementObject>()
-                        .ToList();
+                        .Cast<ManagementObject>();
                 case "MSVM_VIRTUALSYSTEMSETTINGDATA":
                     return
                         VM.GetRelated("MSVM_ResourceAllocationSettingData")
-                        .Cast<ManagementObject>()
-                        .ToList();
+                        .Cast<ManagementObject>();
                 default:
                     break;
             }
             return null;
         }
 
-        public static IList<ManagementObject> Filter(this IList<ManagementObject> list, string key, string value, bool NOT = false)
+        public static IEnumerable<ManagementObject> Filter(this IList<ManagementObject> list, string key, string value, bool NOT = false)
         {
             if (list == null)
                 return null;
@@ -357,7 +356,7 @@ namespace VMProvisioningAgent
         /// <param name="VHD"></param>
         /// <param name="Server"></param>
         /// <returns></returns>
-        public static IList<ManagementObject> LocateVHD(string VHD, string Server = null)
+        public static IEnumerable<ManagementObject> LocateVHD(string VHD, string Server = null)
         {
             ManagementScope scope = GetScope(Server);
             var VHDs = new ManagementObjectSearcher(scope,
