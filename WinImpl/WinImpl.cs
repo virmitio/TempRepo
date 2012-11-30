@@ -38,8 +38,8 @@ namespace WinImpl
 
             if (ProxyVM != null)
             {
-
                 //TODO: Mount to VM, then report location (if possible?)
+                throw new NotImplementedException();
             }
 
             ManagementObject SvcObj = Utility.GetServiceObject(Utility.GetScope(), Utility.ServiceNames.ImageManagement);
@@ -74,7 +74,31 @@ namespace WinImpl
 
         public bool UnmountVHD(string VHD, string ProxyVM, string AlternateInterface)
         {
-            throw new NotImplementedException();
+            if (AlternateInterface != null)
+            {
+                Type Plug = PluginLoader.FindType(AlternateInterface);
+                if (Plug == null)
+                {
+                    PluginLoader.ScanForPlugins();
+                    Plug = PluginLoader.FindType(AlternateInterface);
+                }
+                if (Plug != null)
+                {
+                    dynamic Alt = Activator.CreateInstance(Plug);
+                    return Alt.MountVHD(VHD, ProxyVM);
+                }
+                return false;
+            }
+
+            if (ProxyVM != null)
+            {
+                //TODO: Unmount to VM, then report location (if possible?)
+                throw new NotImplementedException();
+            }
+
+            ManagementObject SvcObj = Utility.GetServiceObject(Utility.GetScope(), Utility.ServiceNames.ImageManagement);
+            ManagementObject result = (ManagementObject)SvcObj.InvokeMethod("Unmount", new object[] { VHD });
+            return ((int) result["ReturnValue"] == 0);
         }
 
         public bool WriteFile(byte[] Data, string Location, string ProxyVM, string AlternateInterface)
