@@ -1,6 +1,7 @@
 ﻿
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Management;
 using System.Text;
@@ -100,6 +101,14 @@ namespace VMProvisioningAgent
         {
             public const string VSManagement = "MSVM_VirtualSystemManagementService";
             public const string ImageManagement = "MSVM_ImageManagementService";
+        }
+
+        public static class DiskStrings
+        {
+            public const string MountedStorage = "MSVM_MountedStorageImage";
+            public const string DiskDrive = "Win32_DiskDrive";
+            public const string DiskPartition = "Win32_DiskPartition";
+            public const string LogicalDisk = "Win32_LogicalDisk";
         }
 
         public static IEnumerable<ManagementObject> GetVM(string VMName = null, string VMID = null, string Server = null)
@@ -375,6 +384,54 @@ namespace VMProvisioningAgent
                 VMs.AddRange(GetVM(scope, VMID: id));
             }
             return VMs;
+        }
+
+        /// <summary>
+        /// Attempts to locate an installation of Windows on the drive specified by Location
+        /// </summary>
+        /// <param name="Location">An arbitrary path on the drive to search.</param>
+        /// <returns>The root folder of the Windows installation if one is found.  Null otherwise.</returns>
+        public static string DetectWindows(string Location)
+        {
+            const string postfix = @"\System32\config";
+            try
+            {
+                string path = Path.GetPathRoot(Location);
+                var dirs = Directory.GetDirectories(path);
+                return dirs.FirstOrDefault(dir => 
+                    File.Exists(dir + postfix + @"\SYSTEM") && File.Exists(dir + postfix + @"\SOFTWARE"));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        public static bool PathIsFromVHD(string Location)
+        {
+            string root = Path.GetPathRoot(Location);
+            if (root == null)
+                return false;
+            var scope = new ManagementScope(@"root\cimv2");
+            scope.Connect();
+            var drives = new ManagementObjectSearcher(scope,
+                                         new SelectQuery(DiskStrings.LogicalDisk,
+                                                         "DeviceID like '" +
+                                                         root.Substring(0, root.IndexOf(':')) +
+                                                         "'")).Get();
+            return
+                drives.Cast<ManagementObject>().Any(
+                    drive =>
+                    drive.GetRelated(DiskStrings.DiskPartition).Cast<ManagementObject>().Any(
+                        part =>
+                        part.GetRelated(DiskStrings.DiskDrive).Cast<ManagementObject>().Any(
+                            device =>
+                            new ManagementObjectSearcher(GetScope(),
+                                                         new SelectQuery(DiskStrings.MountedStorage,
+                                                                         "Lun=" + device["SCSILogicalUnit"] +
+                                                                         " and PortNumber=" + device["SCSIPort"] +
+                                                                         " and TargetID=" + device["SCSITargetID"]))
+                                .Get().Cast<ManagementObject>().Any())));
         }
     }
 }

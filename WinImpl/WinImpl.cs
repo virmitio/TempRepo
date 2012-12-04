@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Management;
@@ -9,14 +11,6 @@ namespace WinImpl
 {
     public class WinImpl : IProvisioner
     {
-        private static class DiskStrings
-        {
-            public const string MountedStorage = "MSVM_MountedStorageImage";
-            public const string DiskDrive = "Win32_DiskDrive";
-            public const string DiskPartition = "Win32_DiskPartition";
-            public const string LogicalDisk = "Win32_LogicalDisk";
-        }
-
         public string[] MountVHD(out bool Status, string VHD, string ProxyVM, string AlternateInterface)
         {
             if (AlternateInterface != null)
@@ -51,19 +45,20 @@ namespace WinImpl
             }
             
             List<string> ret = new List<string>();
-            var image = new ManagementObjectSearcher(Utility.GetScope(), new SelectQuery(DiskStrings.MountedStorage)).Get()
+            var image = new ManagementObjectSearcher(Utility.GetScope(), new SelectQuery(Utility.DiskStrings.MountedStorage)).Get()
                             .Cast<ManagementObject>()
                             .Where(Obj => (Obj["Name"].ToString().Equals(VHD, StringComparison.InvariantCultureIgnoreCase)))
                             .FirstOrDefault();
             var baseScope = new ManagementScope(@"root\cimv2");
+            baseScope.Connect();
             var disk = new ManagementObjectSearcher(baseScope,
-                                                    new SelectQuery(DiskStrings.DiskDrive,
+                                                    new SelectQuery(Utility.DiskStrings.DiskDrive,
                                                                     "SCSILogicalUnit=" + image["Lun"] +
                                                                     " and SCSIPort=" + image["PortNumber"] +
                                                                     " and SCSITargetID=" + image["TargetID"]))
                 .Get().Cast<ManagementObject>().FirstOrDefault();
-            var parts = disk.GetRelated(DiskStrings.DiskPartition);
-            foreach (var drives in from ManagementObject part in parts select part.GetRelated(DiskStrings.LogicalDisk))
+            var parts = disk.GetRelated(Utility.DiskStrings.DiskPartition);
+            foreach (var drives in from ManagementObject part in parts select part.GetRelated(Utility.DiskStrings.LogicalDisk))
             {
                 ret.AddRange(from ManagementObject drive in drives select drive["DeviceID"].ToString());
             }
@@ -85,7 +80,7 @@ namespace WinImpl
                 if (Plug != null)
                 {
                     dynamic Alt = Activator.CreateInstance(Plug);
-                    return Alt.MountVHD(VHD, ProxyVM);
+                    return Alt.UnmountVHD(VHD, ProxyVM);
                 }
                 return false;
             }
@@ -103,12 +98,85 @@ namespace WinImpl
 
         public bool WriteFile(byte[] Data, string Location, string ProxyVM, string AlternateInterface)
         {
-            throw new NotImplementedException();
+            if (Location == null || Location.Equals(String.Empty))
+                return false;
+
+            if (AlternateInterface != null)
+            {
+                Type Plug = PluginLoader.FindType(AlternateInterface);
+                if (Plug == null)
+                {
+                    PluginLoader.ScanForPlugins();
+                    Plug = PluginLoader.FindType(AlternateInterface);
+                }
+                if (Plug != null)
+                {
+                    dynamic Alt = Activator.CreateInstance(Plug);
+                    return Alt.WriteFile(Data, Location, ProxyVM);
+                }
+                return false;
+            }
+
+            if (ProxyVM != null)
+            {
+                //TODO: Issue remote write command to the VM
+                throw new NotImplementedException();
+            }
+
+            if (!Utility.PathIsFromVHD(Location))
+                throw new InvalidOperationException("This method may only target mounted VHDs.");
+
+            try
+            {
+                var file = File.Open(Location, FileMode.OpenOrCreate, FileAccess.Write);
+                file.Write(Data, 0, Data.Length);
+                file.SetLength(Data.Length);
+                return true;
+            }
+            catch(Exception)
+            {
+                return false;
+            }
         }
 
         public byte[] ReadFile(out bool Status, string Location, string ProxyVM, string AlternateInterface)
         {
-            throw new NotImplementedException();
+            // Until proven otherwise, we assume the status is 'False'
+            Status = false;
+            if (AlternateInterface != null)
+            {
+                Type Plug = PluginLoader.FindType(AlternateInterface);
+                if (Plug == null)
+                {
+                    PluginLoader.ScanForPlugins();
+                    Plug = PluginLoader.FindType(AlternateInterface);
+                }
+                if (Plug != null)
+                {
+                    dynamic Alt = Activator.CreateInstance(Plug);
+                    return Alt.ReadFile(out Status, Location, ProxyVM);
+                }
+                return null;
+            }
+
+            if (ProxyVM != null)
+            {
+                //TODO: Issue remote write command to the VM
+                throw new NotImplementedException();
+            }
+
+            try
+            {
+                var file = File.OpenRead(Location);
+                var data = new byte[file.Length];
+                file.Read(data, 0, data.Length);
+                Status = true;
+                return data;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         public bool WriteUserRegistry(string VHD, string Username, string DataPath, object Data, string DataType, string ProxyVM, string AlternateInterface)
