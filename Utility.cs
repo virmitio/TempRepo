@@ -412,5 +412,35 @@ namespace VMProvisioningAgent
                                                                          " and TargetID=" + device["SCSITargetID"]))
                                 .Get().Cast<ManagementObject>().Any())));
         }
+
+        public static string PathToVHD(string Location)
+        {
+            string root = Path.GetPathRoot(Location);
+            if (root == null)
+                return null;
+            var scope = new ManagementScope(@"root\cimv2");
+            scope.Connect();
+            var drives = new ManagementObjectSearcher(scope,
+                                         new SelectQuery(DiskStrings.LogicalDisk,
+                                                         "DeviceID like '" +
+                                                         root.Substring(0, root.IndexOf(':')) +
+                                                         "'")).Get();
+
+            return (from ManagementObject drive in drives
+                    from part in drive.GetRelated(DiskStrings.DiskPartition).Cast<ManagementObject>()
+                    from device in part.GetRelated(DiskStrings.DiskDrive).Cast<ManagementObject>()
+                    select device).Select(
+                        device =>
+                        new ManagementObjectSearcher(GetScope(),
+                                                     new SelectQuery(DiskStrings.MountedStorage,
+                                                                     "Lun=" + device["SCSILogicalUnit"] +
+                                                                     " and PortNumber=" + device["SCSIPort"] +
+                                                                     " and TargetID=" + device["SCSITargetID"]))
+                            .Get().Cast<ManagementObject>()
+                            .FirstOrDefault()["Name"]
+                            .ToString())
+                .FirstOrDefault();
+        }
+
     }
 }
