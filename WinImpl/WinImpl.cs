@@ -161,7 +161,7 @@ namespace WinImpl
 
             if (ProxyVM != null)
             {
-                //TODO: Issue remote write command to the VM
+                //TODO: Issue remote read command to the VM
                 throw new NotImplementedException();
             }
 
@@ -179,24 +179,88 @@ namespace WinImpl
             }
         }
 
-        public bool WriteUserRegistry(string VHD, string Username, string DataPath, object Data, string DataType, string ProxyVM, string AlternateInterface)
+        const string SysRegPostfix = @"\System32\config";
+
+        public bool WriteUserRegistry(string Root, string Username, string DataPath, object Data, string DataType, string ProxyVM, string AlternateInterface)
         {
             throw new NotImplementedException();
         }
 
-        public bool WriteMachineRegistry(string VHD, string DataPath, object Data, string DataType, string ProxyVM, string AlternateInterface)
+        public bool WriteMachineRegistry(string Root, string DataPath, object Data, string DataType, string ProxyVM, string AlternateInterface)
         {
             throw new NotImplementedException();
         }
 
-        public object ReadUserRegistry(out bool Status, string VHD, string Username, string DataPath, string ProxyVM, string AlternateInterface)
+        public object ReadUserRegistry(out bool Status, string Root, string Username, string DataPath, string ProxyVM, string AlternateInterface)
         {
             throw new NotImplementedException();
         }
 
-        public object ReadMachineRegistry(out bool Status, string VHD, string DataPath, string ProxyVM, string AlternateInterface)
+        public object ReadMachineRegistry(out bool Status, string Root, string DataPath, string ProxyVM, string AlternateInterface)
         {
+            // Until proven otherwise, we assume the status is 'False'
+            Status = false;
+            if (AlternateInterface != null)
+            {
+                Type Plug = PluginLoader.FindType(AlternateInterface);
+                if (Plug == null)
+                {
+                    PluginLoader.ScanForPlugins();
+                    Plug = PluginLoader.FindType(AlternateInterface);
+                }
+                if (Plug != null)
+                {
+                    dynamic Alt = Activator.CreateInstance(Plug);
+                    return Alt.ReadMachineRegistry(out Status, Root, DataPath, ProxyVM);
+                }
+                return null;
+            }
+
+            if (ProxyVM != null)
+            {
+                //TODO: Issue remote registry command to the VM
+                throw new NotImplementedException();
+            }
+
+            if (Path.HasExtension(Root) &&
+                Path.GetExtension(Root))
+            {
+                
+            }
+
+            string winRoot = DetectWindows(Root);
+            if (winRoot == null)
+                return null;
+
+
             throw new NotImplementedException();
+        }
+
+        /// <summary>
+        /// Attempts to locate an installation of Windows on the drive specified by Location
+        /// </summary>
+        /// <param name="Location">An arbitrary path on the drive to search.</param>
+        /// <returns>The root folder of the Windows installation if one is found.  Null otherwise.</returns>
+        public static string DetectWindows(string Location)
+        {
+            try
+            {
+                string path = Path.GetPathRoot(Location);
+                var dirs = Directory.GetDirectories(path);
+                return dirs.FirstOrDefault(dir =>
+                    File.Exists(dir + SysRegPostfix + @"\SYSTEM") && 
+                    File.Exists(dir + SysRegPostfix + @"\SOFTWARE"));
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+
+        public static string LocateUserRoot(string WindowsRoot)
+        {
+            
         }
     }
 }

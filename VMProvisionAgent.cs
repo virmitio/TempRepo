@@ -52,7 +52,7 @@ namespace VMProvisioningAgent
         /// <summary>
         /// 
         /// </summary>
-        /// <param name="VHD"></param>
+        /// <param name="Root">Location to find registry hives.  This may be a drive letter or a path to a VHD file.</param>
         /// <param name="Username"></param>
         /// <param name="DataPath"></param>
         /// <param name="Data"></param>
@@ -60,42 +60,42 @@ namespace VMProvisioningAgent
         /// <param name="ProxyVM"></param>
         /// <param name="AlternateInterface"></param>
         /// <returns></returns>
-        bool WriteUserRegistry(string VHD, string Username, string DataPath, object Data, string DataType = "string", string ProxyVM = null, string AlternateInterface = null);
+        bool WriteUserRegistry(string Root, string Username, string DataPath, object Data, string DataType = "string", string ProxyVM = null, string AlternateInterface = null);
 
         /// <summary>
         /// 
         /// </summary>
-        /// <param name="VHD"></param>
+        /// <param name="Root">Location to find registry hives.  This may be a drive letter or a path to a VHD file.</param>
         /// <param name="DataPath"></param>
         /// <param name="Data"></param>
         /// <param name="DataType"></param>
         /// <param name="ProxyVM"></param>
         /// <param name="AlternateInterface"></param>
         /// <returns></returns>
-        bool WriteMachineRegistry(string VHD, string DataPath, object Data, string DataType = "string", string ProxyVM = null, string AlternateInterface = null);
+        bool WriteMachineRegistry(string Root, string DataPath, object Data, string DataType = "string", string ProxyVM = null, string AlternateInterface = null);
 
         /// <summary>
         /// 
         /// </summary>
         /// <param name="Status"></param>
-        /// <param name="VHD"></param>
+        /// <param name="Root">Location to find registry hives.  This may be a drive letter or a path to a VHD file.</param>
         /// <param name="Username"></param>
         /// <param name="DataPath"></param>
         /// <param name="ProxyVM"></param>
         /// <param name="AlternateInterface"></param>
         /// <returns></returns>
-        object ReadUserRegistry(out bool Status, string VHD, string Username, string DataPath, string ProxyVM = null, string AlternateInterface = null);
+        object ReadUserRegistry(out bool Status, string Root, string Username, string DataPath, string ProxyVM = null, string AlternateInterface = null);
         
         /// <summary>
         /// 
         /// </summary>
         /// <param name="Status"></param>
-        /// <param name="VHD"></param>
+        /// <param name="Root">Location to find registry hives.  This may be a drive letter or a path to a VHD file.</param>
         /// <param name="DataPath"></param>
         /// <param name="ProxyVM"></param>
         /// <param name="AlternateInterface"></param>
         /// <returns></returns>
-        object ReadMachineRegistry(out bool Status, string VHD, string DataPath, string ProxyVM = null, string AlternateInterface = null);
+        object ReadMachineRegistry(out bool Status, string Root, string DataPath, string ProxyVM = null, string AlternateInterface = null);
     }
 
     public static class PluginLoader

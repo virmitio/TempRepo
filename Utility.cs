@@ -386,27 +386,6 @@ namespace VMProvisioningAgent
             return VMs;
         }
 
-        /// <summary>
-        /// Attempts to locate an installation of Windows on the drive specified by Location
-        /// </summary>
-        /// <param name="Location">An arbitrary path on the drive to search.</param>
-        /// <returns>The root folder of the Windows installation if one is found.  Null otherwise.</returns>
-        public static string DetectWindows(string Location)
-        {
-            const string postfix = @"\System32\config";
-            try
-            {
-                string path = Path.GetPathRoot(Location);
-                var dirs = Directory.GetDirectories(path);
-                return dirs.FirstOrDefault(dir => 
-                    File.Exists(dir + postfix + @"\SYSTEM") && File.Exists(dir + postfix + @"\SOFTWARE"));
-            }
-            catch (Exception)
-            {
-                return null;
-            }
-        }
-
         public static bool PathIsFromVHD(string Location)
         {
             string root = Path.GetPathRoot(Location);
