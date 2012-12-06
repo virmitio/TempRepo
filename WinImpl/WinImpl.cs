@@ -169,12 +169,178 @@ namespace WinImpl
 
         public bool WriteUserRegistry(string Root, string Username, string DataPath, object Data, string DataType, string ProxyVM = null, string AlternateInterface = null)
         {
-            throw new NotImplementedException();
+            if (AlternateInterface != null)
+            {
+                Type Plug = PluginLoader.FindType(AlternateInterface);
+                if (Plug == null)
+                {
+                    PluginLoader.ScanForPlugins();
+                    Plug = PluginLoader.FindType(AlternateInterface);
+                }
+                if (Plug != null)
+                {
+                    dynamic Alt = Activator.CreateInstance(Plug);
+                    return Alt.ReadUserRegistry(Root, Username, DataPath, Data, DataType, ProxyVM);
+                }
+                return false;
+            }
+
+            if (ProxyVM != null)
+            {
+                //TODO: Issue remote registry command to the VM
+                throw new NotImplementedException();
+            }
+
+            string userFileRoot = null;
+            if (Path.HasExtension(Root) &&
+                VHDExtensions.Contains(Path.GetExtension(Root), StringComparer.InvariantCultureIgnoreCase))
+            {
+                //This is a VHD file, mount it, and check each partition on it for a windows install.
+                // Use the first win install we find.
+                // If we don't find one, return Null with Status set to 'False'
+
+                //Is this drive already mounted?
+                var arr = GetMountPoints(Root) ?? new string[0];
+                if (arr.Length == 0)
+                {
+                    //Nope, not mounted yet.  Do so now.
+                    bool mountStatus;
+                    arr = MountVHD(out mountStatus, Root);
+
+                    if (mountStatus == false)
+                        return false;
+                }
+                userFileRoot = arr.Where(s => LocateUserRoot(s + @"\") != null).FirstOrDefault();
+            }
+            else
+            {
+                // Not a VHD file.  Find Windows on this partition.
+                userFileRoot = LocateUserRoot(Root);
+            }
+            if (userFileRoot == null) // Can't get there from here.
+                return false;
+
+            // Ok, we have a root Users directory.  Check for our user and load if possible.
+            string userPath = Path.Combine(userFileRoot, Username);
+            if (!Directory.Exists(userPath))
+                throw new ArgumentException("Username not found.  Invalid user path: " + userPath);
+
+            string hiveFile = Path.Combine(userPath, @"NTUSER.DAT");
+            if (!File.Exists(hiveFile))
+                throw new ArgumentException("User data not found.  Invalid file path: " + hiveFile);
+
+            string regRoot = RegExtra.LoadHive(RegistryHive.LocalMachine, hiveFile);
+            if (regRoot == null)
+                return false;
+            var location = Registry.LocalMachine.OpenSubKey(regRoot);
+            if (location == null)
+                return false;
+            var parts = DataPath.Split('\\');
+            for (int i = 0; i < parts.Length - 1; i++)
+            {
+                location = location.CreateSubKey(parts[i]);
+                if (location == null)
+                    return false;
+            }
+            RegistryValueKind type;
+            if (Enum.TryParse(DataType, out type))
+                location.SetValue(parts[parts.Length - 1], Data, type);
+            else
+                location.SetValue(parts[parts.Length - 1], Data);
+            RegExtra.UnloadHive(RegistryHive.LocalMachine, hiveFile);
+            return true;
         }
 
         public bool WriteMachineRegistry(string Root, string DataPath, object Data, string DataType, string ProxyVM = null, string AlternateInterface = null)
         {
-            throw new NotImplementedException();
+            if (AlternateInterface != null)
+            {
+                Type Plug = PluginLoader.FindType(AlternateInterface);
+                if (Plug == null)
+                {
+                    PluginLoader.ScanForPlugins();
+                    Plug = PluginLoader.FindType(AlternateInterface);
+                }
+                if (Plug != null)
+                {
+                    dynamic Alt = Activator.CreateInstance(Plug);
+                    return Alt.WriteMachineRegistry(Root, DataPath, Data, DataType, ProxyVM);
+                }
+                return false;
+            }
+
+            if (ProxyVM != null)
+            {
+                //TODO: Issue remote registry command to the VM
+                throw new NotImplementedException();
+            }
+
+            string winRoot = null;
+            if (Path.HasExtension(Root) &&
+                VHDExtensions.Contains(Path.GetExtension(Root), StringComparer.InvariantCultureIgnoreCase))
+            {
+                //This is a VHD file, mount it, and check each partition on it for a windows install.
+                // Use the first win install we find.
+                // If we don't find one, return Null with Status set to 'False'
+
+                //Is this drive already mounted?
+                var arr = GetMountPoints(Root) ?? new string[0];
+                if (arr.Length == 0)
+                {
+                    //Nope, not mounted yet.  Do so now.
+                    bool mountStatus;
+                    arr = MountVHD(out mountStatus, Root);
+
+                    if (mountStatus == false)
+                        return false;
+                }
+                winRoot = arr.Where(s => DetectWindows(s + @"\") != null).FirstOrDefault();
+            }
+            else
+            {
+                // Not a VHD file.  Find Windows on this partition.
+                winRoot = DetectWindows(Root);
+            }
+            if (winRoot == null) // Can't get there from here.
+                return false;
+
+            // Ok, we have a Windows registry (or appear to, at any rate).  What hive do we need to load?
+            var parts = DataPath.Split('\\');
+            int partIndex = 0;
+            bool partFound = false;
+            while (!partFound && partIndex < parts.Length)
+            {
+                if (parts[partIndex].Equals("SOFTWARE", StringComparison.InvariantCultureIgnoreCase) ||
+                    parts[partIndex].Equals("SYSTEM", StringComparison.InvariantCultureIgnoreCase))
+                    partFound = true;
+                else
+                    partIndex++;
+            }
+            if (!partFound)
+                throw new ArgumentException("DataPath must refer to SOFTWARE or SYSTEM roots.");
+
+            string hiveFile = Path.Combine(winRoot + SysRegPostfix, parts[partIndex]);
+
+            string newRoot = RegExtra.LoadHive(RegistryHive.LocalMachine, hiveFile);
+            if (newRoot == null)
+                return false;
+            var location = Registry.LocalMachine.OpenSubKey(newRoot);
+            if (location == null)
+                return false;
+            for (int i = partIndex + 1; i < parts.Length - 1; i++)
+            {
+                location = location.CreateSubKey(parts[i]);
+                if (location == null)
+                    return false;
+            }
+
+            RegistryValueKind type;
+            if (Enum.TryParse(DataType, out type))
+                location.SetValue(parts[parts.Length - 1], Data, type);
+            else
+                location.SetValue(parts[parts.Length - 1], Data);
+            RegExtra.UnloadHive(RegistryHive.LocalMachine, hiveFile);
+            return true;
         }
 
         public object ReadUserRegistry(out bool Status, string Root, string Username, string DataPath, string ProxyVM = null, string AlternateInterface = null)
