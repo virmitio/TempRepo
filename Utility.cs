@@ -111,6 +111,15 @@ namespace VMProvisioningAgent
             public const string LogicalDisk = "Win32_LogicalDisk";
         }
 
+        public static class VMStrings
+        {
+            public const string GlobalSettingData = "MSVM_VirtualSystemGlobalSettingData";
+            public const string ResAllocData = "MSVM_ResourceAllocationSettingData";
+            public const string SettingData = "MSVM_VirtualSystemSettingData";
+            public const string ComputerSystem = "MSVM_ComputerSystem";
+
+        }
+
         public static IEnumerable<ManagementObject> GetVM(string VMName = null, string VMID = null, string Server = null)
         {
             ManagementScope scope = GetScope(Server);
@@ -121,7 +130,7 @@ namespace VMProvisioningAgent
         {
             VMID = VMID ?? "%";
             var VMs = new ManagementObjectSearcher(scope,
-                    new SelectQuery("MSVM_ComputerSystem", 
+                    new SelectQuery(VMStrings.ComputerSystem, 
                                     "ProcessID >= 0 and ElementName like '" +
                                     VMName ?? "%" + "' and Name like '" +
                                     VMID.ToUpperInvariant() + "'")
@@ -156,7 +165,7 @@ namespace VMProvisioningAgent
             switch (VM["__CLASS"].ToString().ToUpperInvariant())
             {
                 case "MSVM_COMPUTERSYSTEM":
-                    foreach (ManagementObject item in VM.GetRelated("MSVM_VirtualSystemSettingData"))
+                    foreach (ManagementObject item in VM.GetRelated(VMStrings.SettingData))
                     {
                         return item;
                     }
@@ -174,11 +183,11 @@ namespace VMProvisioningAgent
                 case "MSVM_COMPUTERSYSTEM":
                     return
                         VM.GetSettings()
-                        .GetRelated("MSVM_ResourceAllocationSettingData")
+                        .GetRelated(VMStrings.ResAllocData)
                         .Cast<ManagementObject>();
                 case "MSVM_VIRTUALSYSTEMSETTINGDATA":
                     return
-                        VM.GetRelated("MSVM_ResourceAllocationSettingData")
+                        VM.GetRelated(VMStrings.ResAllocData)
                         .Cast<ManagementObject>();
                 default:
                     break;
@@ -252,7 +261,7 @@ namespace VMProvisioningAgent
                                            device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerIDE)
                                            || device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerSCSI)
                                            select device).FirstOrDefault();
-                    ManagementObject drive = NewObject(ResourceTypes.StorageExtent, ResourceSubTypes.VHD);
+                    ManagementObject drive = NewResource(ResourceTypes.StorageExtent, ResourceSubTypes.VHD);
                     drive["Connection"] = SourceVHD;
                     drive["Parent"] = ControllerDevice.Path;
                     ManagementObject job;
@@ -323,7 +332,7 @@ namespace VMProvisioningAgent
                                      .FirstOrDefault();
         }
 
-        public static ManagementObject NewObject(ResourceTypes ResType, string SubType)
+        public static ManagementObject NewResource(ResourceTypes ResType, string SubType)
         {
             var AllocCap = new ManagementObjectSearcher(
                 new SelectQuery(
@@ -369,7 +378,7 @@ namespace VMProvisioningAgent
         {
             ManagementScope scope = GetScope(Server);
             var VHDs = new ManagementObjectSearcher(scope,
-                            new SelectQuery("MSVM_ResourceAllocationSettingData",
+                            new SelectQuery(VMStrings.ResAllocData,
                                             "ResourceSubType like '" +
                                             ResourceSubTypes.VHD + "'")).Get().Cast<ManagementObject>();
             VHDs = VHDs.Where(obj =>
@@ -441,6 +450,37 @@ namespace VMProvisioningAgent
                             .ToString())
                 .FirstOrDefault();
         }
+
+        public static ManagementObject NewVM(string VMName, string Server = null)
+        {
+            if (VMName == null)
+                return null;
+            var MgmtSvc = GetServiceObject(GetScope(Server), ServiceNames.VSManagement);
+            var settings = new ManagementClass(GetScope(Server),
+                                               new ManagementPath(VMStrings.GlobalSettingData),
+                                               new ObjectGetOptions()).CreateInstance();
+            if (settings == null)
+                return null;
+            settings["ElementName"] = VMName;
+            ManagementObject Comp = new ManagementObject();
+            ManagementObject Job = new ManagementObject();
+            var result = (int)MgmtSvc.InvokeMethod("DefineVirtualSystem",
+                                                           new object[]
+                                                               {
+                                                                   settings.GetText(TextFormat.WmiDtd20),
+                                                                   null, null, Comp, Job
+                                                               });
+            switch (result)
+            {
+                case (int)ReturnCodes.OK:
+                    return Comp;
+                case (int)ReturnCodes.JobStarted:
+                    return WaitForJob(Job) == 0 ? Comp : null;
+                default:
+                    return null;
+            }
+        }
+
 
     }
 }
