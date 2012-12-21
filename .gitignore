@@ -13,3 +13,4 @@ coapp-tools-personal.sln
 *.ReSharper
 ipch
 *.InstallLog
+packages

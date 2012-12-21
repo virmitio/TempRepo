@@ -94,13 +94,16 @@ namespace VMProvisioningAgent
             public const string CDDVD = "Microsoft Virtual CD/DVD Disk";
             public const string ControllerIDE = "Microsoft Emulated IDE Controller";
             public const string ControllerSCSI = "Microsoft Synthetic SCSI Controller";
-
+            public const string LegacyNIC = "Microsoft Emulated Ethernet Port";
+            public const string SyntheticNIC = "Microsoft Synthetic Ethernet Port";
+            public const string SerialPort = "Microsoft Serial Port";
         }
 
         public static class ServiceNames
         {
             public const string VSManagement = "MSVM_VirtualSystemManagementService";
             public const string ImageManagement = "MSVM_ImageManagementService";
+            public const string SwitchManagement = "MsVM_VirtualSwitchManagementService";
         }
 
         public static class DiskStrings
@@ -117,7 +120,9 @@ namespace VMProvisioningAgent
             public const string ResAllocData = "MSVM_ResourceAllocationSettingData";
             public const string SettingData = "MSVM_VirtualSystemSettingData";
             public const string ComputerSystem = "MSVM_ComputerSystem";
-
+            public const string MemorySettings = "MSVM_MemorySettingData";
+            public const string ProcessorSettings = "MsVM_ProcessorSettingData";
+            public const string VirtualSwitch = "Msvm_VirtualSwitch";
         }
 
         public static IEnumerable<ManagementObject> GetVM(string VMName = null, string VMID = null, string Server = null)
@@ -160,6 +165,11 @@ namespace VMProvisioningAgent
             return vhds;
         }
 
+        /// <summary>
+        /// Returns the MSVM_VirtualSystemSettingData associated with the VM.
+        /// </summary>
+        /// <param name="VM"></param>
+        /// <returns></returns>
         public static ManagementObject GetSettings(this ManagementObject VM)
         {
             switch (VM["__CLASS"].ToString().ToUpperInvariant())
@@ -256,6 +266,19 @@ namespace VMProvisioningAgent
             switch (VM["__CLASS"].ToString().ToUpperInvariant())
             {
                 case "MSVM_COMPUTERSYSTEM":
+                    if (ControllerDevice == null)
+                    {
+                        var controllers = from device in VM.GetDevices()
+                                          where
+                                              device["ResourceSubType"].ToString()
+                                                                       .Equals(ResourceSubTypes.ControllerIDE)
+                                              ||
+                                              device["ResourceSubType"].ToString()
+                                                                       .Equals(ResourceSubTypes.ControllerSCSI)
+                                          select device;
+                        
+                    }
+
                     ControllerDevice = ControllerDevice ??
                                        (from device in VM.GetDevices() where 
                                            device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerIDE)
@@ -301,11 +324,19 @@ namespace VMProvisioningAgent
             }
         }
 
-        public static int AddDevice(this ManagementObject VM, ManagementObject Device)
+        public static bool AddDevice(this ManagementObject VM, ManagementObject Device)
         {
             ManagementObject Job;
-            return AddDevice(VM, Device, out Job);
-
+            uint ret = (uint)AddDevice(VM, Device, out Job);
+            switch (ret)
+            {
+                case (int)ReturnCodes.OK:
+                    return true;
+                case (int)ReturnCodes.JobStarted:
+                    return (WaitForJob(Job) == 0);
+                default:
+                    return false;
+            }
         }
 
         public static int AddDevice(this ManagementObject VM, ManagementObject Device, out ManagementObject Job)
@@ -323,6 +354,36 @@ namespace VMProvisioningAgent
             }
         }
 
+        public static bool ModifyDevice(this ManagementObject VM, ManagementObject Device)
+        {
+            ManagementObject Job;
+            uint ret = (uint)ModifyDevice(VM, Device, out Job);
+            switch (ret)
+            {
+                case (int)ReturnCodes.OK:
+                    return true;
+                case (int)ReturnCodes.JobStarted:
+                    return (WaitForJob(Job) == 0);
+                default:
+                    return false;
+            }
+        }
+
+        public static int ModifyDevice(this ManagementObject VM, ManagementObject Device, out ManagementObject Job)
+        {
+            Job = null;
+            switch (VM["__CLASS"].ToString().ToUpperInvariant())
+            {
+                case "MSVM_COMPUTERSYSTEM":
+                    ManagementObject ServiceObj = GetServiceObject(VM.GetScope(), ServiceNames.VSManagement);
+                    Job = new ManagementObject();
+                    return (Int32)ServiceObj.InvokeMethod("ModifyVirtualSystemResources",
+                                            new object[] { VM.Path, Device.GetText(TextFormat.WmiDtd20), null, Job });
+                default:
+                    return -1;
+            }
+        }
+
         public static ManagementObject GetServiceObject(ManagementScope Scope, string ServiceName)
         {
             return new ManagementClass(Scope, 
@@ -332,16 +393,21 @@ namespace VMProvisioningAgent
                                      .FirstOrDefault();
         }
 
-        public static ManagementObject NewResource(ResourceTypes ResType, string SubType)
+        public static ManagementObject NewResource(ResourceTypes ResType, string SubType, string Server = null)
         {
-            var AllocCap = new ManagementObjectSearcher(
+            return NewResource(ResType, SubType, GetScope(Server));
+        }
+
+        public static ManagementObject NewResource(ResourceTypes ResType, string SubType, ManagementScope Scope)
+        {
+            var AllocCap = new ManagementObjectSearcher(Scope,
                 new SelectQuery(
                     "MSVM_AllocationCapabilities",
                     "ResourceType = " + ResType +
                     " and ResourceSubType = '" + SubType + "'"
                     )
                 ).Get().Cast<ManagementObject>().FirstOrDefault();
-            var objType = new ManagementObjectSearcher(
+            var objType = new ManagementObjectSearcher(Scope,
                 new SelectQuery(
                     "MSVM_SettingsDefineCapabilities",
                     "ValueRange = 0 and GroupComponent = '" + AllocCap["__Path"] + "'"
@@ -389,7 +455,7 @@ namespace VMProvisioningAgent
             List<ManagementObject> VMs = new List<ManagementObject>();
             foreach (var vhd in VHDs)
             {
-                string id = ((string) vhd["InstanceID"]).Split('\\')[0].Split(':')[-1];
+                string id = ((string) vhd["InstanceID"]).Split('\\')[0].Split(':').Last();
                 VMs.AddRange(GetVM(scope, VMID: id));
             }
             return VMs;
@@ -446,7 +512,7 @@ namespace VMProvisioningAgent
                                                                      " and PortNumber=" + device["SCSIPort"] +
                                                                      " and TargetID=" + device["SCSITargetID"]))
                             .Get().Cast<ManagementObject>()
-                            .FirstOrDefault()["Name"]
+                            .First()["Name"]
                             .ToString())
                 .FirstOrDefault();
         }
@@ -481,6 +547,186 @@ namespace VMProvisioningAgent
             }
         }
 
+        /// <summary>
+        /// Modifies the CPU and/or Memory configuration of a Virtual Machine.
+        /// </summary>
+        /// <param name="VMName">Name of the VM to modify.</param>
+        /// <param name="Server">The server on which the VM resides.</param>
+        /// <param name="ProcCount">Number of processors to allocate.  'null' to leave unchanged.</param>
+        /// <param name="ProcLimit">Percent limit of processor usage to allow. Range: 1 to 1000.  'null' to leave unchanged.</param>
+        /// <param name="Memory">Amount of initial RAM (in MB) to allocate.  'null' to leave unchanged.</param>
+        /// <param name="MemoryLimit">Maximum RAM that may be allocated when using Dynamic Memory.  Only applicable if Dynamic Memory is enabled.  'null' to leave unchanged.</param>
+        /// <param name="EnableDynamicMemory">Enables or disables Dynamic Memory on this VM.  'null' to leave unchanged.</param>
+        /// <returns>True if a change was succesfully made.</returns>
+        public static bool ModifyVMConfig(string VMName, string Server = null, int? ProcCount = null, int? ProcLimit = null, int? Memory = null, int? MemoryLimit = null, bool? EnableDynamicMemory = null)
+        {
+            // Do we have inputs?
+            if (ProcCount == null && ProcLimit == null && Memory == null && MemoryLimit == null && EnableDynamicMemory == null)
+                return false;
 
+            if (VMName == null || VMName.Equals(String.Empty))
+                throw new ArgumentException();
+
+            ManagementScope scope = GetScope(Server);
+            ManagementObject VM = GetVM(scope, VMName).FirstOrDefault();
+            if (VM == null)
+                throw new ArgumentException();
+
+            return ModifyVMConfig(VM, ProcCount, ProcLimit, Memory, MemoryLimit, EnableDynamicMemory);
+        }
+
+        /// <summary>
+        /// Modifies the CPU and/or Memory configuration of a Virtual Machine.
+        /// </summary>
+        /// <param name="VM">The Virtual Machine to modify.</param>
+        /// <param name="ProcCount">Number of processors to allocate.  'null' to leave unchanged.</param>
+        /// <param name="ProcLimit">Percent limit of processor usage to allow. Range: 1 to 1000.  'null' to leave unchanged.</param>
+        /// <param name="Memory">Amount of initial RAM (in MB) to allocate.  'null' to leave unchanged.</param>
+        /// <param name="MemoryLimit">Maximum RAM that may be allocated when using Dynamic Memory.  Only applicable if Dynamic Memory is enabled.  'null' to leave unchanged.</param>
+        /// <param name="EnableDynamicMemory">Enables or disables Dynamic Memory on this VM.  'null' to leave unchanged.</param>
+        /// <returns>True if a change was succesfully made.</returns>
+        public static bool ModifyVMConfig(this ManagementObject VM, int? ProcCount = null, int? ProcLimit = null, int? Memory = null, int? MemoryLimit = null, bool? EnableDynamicMemory = null)
+        {
+            // Do we have inputs?
+            if (ProcCount == null && ProcLimit == null && Memory == null && MemoryLimit == null && EnableDynamicMemory == null)
+                return false;
+
+            // Rough verify of inputs
+            if (VM == null || !VM["__CLASS"].ToString().Equals(VMStrings.ComputerSystem,StringComparison.InvariantCultureIgnoreCase))
+                throw new ArgumentException();
+            if ((ProcCount != null && (ProcCount < 1 || ProcCount > 4)) ||
+                (ProcLimit != null && (ProcLimit < 1 || ProcLimit > 1000)) ||
+                (Memory != null && Memory < 1) ||
+                (MemoryLimit != null && ((Memory != null && MemoryLimit < Memory) || MemoryLimit < 1)))
+                throw new ArgumentOutOfRangeException();
+
+            ManagementScope scope = VM.GetScope();
+
+            ManagementObject VMSettings = VM.GetSettings();
+            List<string> NewSettings = new List<string>();
+
+            if (ProcCount != null || ProcLimit != null)
+            {
+                var set = VMSettings.GetRelated(VMStrings.ProcessorSettings).Cast<ManagementObject>().First();
+                if (ProcCount != null)
+                    set["VirtualQuantity"] = ProcCount;
+                if (ProcLimit != null)
+                    set["Limit"] = (ProcLimit*100); // Base unit is %0.001, but I'm only operating in tenths of a percent.
+                NewSettings.Add(set.GetText(TextFormat.WmiDtd20));
+            }
+
+            if (Memory != null || MemoryLimit != null || EnableDynamicMemory != null)
+            {
+                var set = VMSettings.GetRelated(VMStrings.MemorySettings).Cast<ManagementObject>().First();
+                
+                if (EnableDynamicMemory != null)
+                    set["DynamicMemoryEnabled"] = EnableDynamicMemory;
+
+                if (MemoryLimit != null)
+                {
+                    if ((bool)set["DynamicMemoryEnabled"])
+                    {
+                        set["Limit"] = MemoryLimit;
+                        if ((int)set["VirtualQuantity"] > MemoryLimit)
+                            set["VirtualQuantity"] = MemoryLimit;
+                    }
+                    else if (Memory == null)
+                        set["VirtualQuantity"] = MemoryLimit;
+                }
+                if (Memory != null)
+                {
+                    set["VirtualQuantity"] = Memory;
+                    set["Reservation"] = Memory;
+                    if ((bool)set["DynamicMemoryEnabled"])
+                        set["Limit"] = Memory;
+                }
+                NewSettings.Add(set.GetText(TextFormat.WmiDtd20));
+            }
+
+            ManagementObject Job = new ManagementObject();
+            var MgmtSvc = GetServiceObject(scope, ServiceNames.VSManagement);
+            uint ret = (uint)MgmtSvc.InvokeMethod("ModifyVirtualSystemResources", new object[]
+                                                                     {
+                                                                         VM,
+                                                                         NewSettings.ToArray(),
+                                                                         Job
+                                                                     });
+            switch (ret)
+            {
+                case (int)ReturnCodes.OK:
+                    return true;
+                case (int)ReturnCodes.JobStarted:
+                    return (WaitForJob(Job) == 0);
+                default:
+                    return false;
+            }
+        }
+
+        public static bool AddNIC(ManagementObject VM, string VirtualSwitch = null, bool Legacy = false)
+        {
+            // Sanity Check
+            if (VM == null || !VM["__CLASS"].ToString().Equals(VMStrings.ComputerSystem, StringComparison.InvariantCultureIgnoreCase))
+            {
+                return false;
+            }
+
+            ManagementScope scope = GetScope(VM);
+            ManagementObject NIC = NewResource(ResourceTypes.EthernetAdapter,
+                                               (Legacy ? ResourceSubTypes.LegacyNIC : ResourceSubTypes.SyntheticNIC),
+                                               scope);
+            NIC["ElementName"] = (Legacy ? "Legacy " : "") + "Network Adapter";
+            NIC["VirtualSystemIdentifiers"] = Guid.NewGuid().ToString("B");
+            if (VirtualSwitch != null)
+            {
+                ManagementObject Switch =
+                    new ManagementObjectSearcher(scope,
+                                                 new SelectQuery(VMStrings.VirtualSwitch,
+                                                                 "ElementName like '" + VirtualSwitch + "'")).Get().Cast
+                        <ManagementObject>().FirstOrDefault();
+                if (Switch == null)
+                {
+                    NIC.Delete();
+                    return false;
+                }
+                
+                ManagementObject Port = new ManagementObject();
+                string PortGUID = Guid.NewGuid().ToString();
+                ManagementObject SwitchSvc = GetServiceObject(scope, ServiceNames.SwitchManagement);
+                uint ret = (uint)SwitchSvc.InvokeMethod("CreateSwitchPort", new object[]
+                                                                          {
+                                                                              Switch,
+                                                                              PortGUID,
+                                                                              PortGUID,
+                                                                              String.Empty,
+                                                                              Port
+                                                                          });
+                if (ret != (int)ReturnCodes.OK)
+                {
+                    NIC.Delete();
+                    return false;
+                }
+                NIC["Connection"] = new [] {Port.Path.ToString()};
+            }
+            return VM.AddDevice(NIC);
+        }
+
+        public static bool SetSerialPort(ManagementObject VM, string PipeName, int PortNumber = 1)
+        {
+            // Sanity Check
+            if (VM == null || !VM["__CLASS"].ToString().Equals(VMStrings.ComputerSystem, StringComparison.InvariantCultureIgnoreCase))
+            {
+                return false;
+            }
+
+            ManagementObject SP = VM.GetDevices().FirstOrDefault(D => D["ResourceSubType"].ToString()
+                                                                                          .Equals(ResourceSubTypes.SerialPort, StringComparison.InvariantCultureIgnoreCase) &&
+                                                                      D["Caption"].ToString().EndsWith(""+PortNumber));
+            if (SP == null)
+                return false;
+
+            SP["Connection"] = new string[] {PipeName};
+            return VM.ModifyDevice(SP);
+        }
     }
+
 }
