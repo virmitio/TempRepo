@@ -266,24 +266,11 @@ namespace VMProvisioningAgent
             switch (VM["__CLASS"].ToString().ToUpperInvariant())
             {
                 case "MSVM_COMPUTERSYSTEM":
-                    if (ControllerDevice == null)
-                    {
-                        var controllers = from device in VM.GetDevices()
-                                          where
-                                              device["ResourceSubType"].ToString()
-                                                                       .Equals(ResourceSubTypes.ControllerIDE)
-                                              ||
-                                              device["ResourceSubType"].ToString()
-                                                                       .Equals(ResourceSubTypes.ControllerSCSI)
-                                          select device;
-                        
-                    }
-
                     ControllerDevice = ControllerDevice ??
                                        (from device in VM.GetDevices() where 
                                            device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerIDE)
                                            || device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerSCSI)
-                                           select device).FirstOrDefault();
+                                           select device).First();
                     ManagementObject drive = NewResource(ResourceTypes.StorageExtent, ResourceSubTypes.VHD);
                     drive["Connection"] = SourceVHD;
                     drive["Parent"] = ControllerDevice.Path;
@@ -662,7 +649,7 @@ namespace VMProvisioningAgent
             }
         }
 
-        public static bool AddNIC(ManagementObject VM, string VirtualSwitch = null, bool Legacy = false)
+        public static bool AddNIC(this ManagementObject VM, string VirtualSwitch = null, bool Legacy = false)
         {
             // Sanity Check
             if (VM == null || !VM["__CLASS"].ToString().Equals(VMStrings.ComputerSystem, StringComparison.InvariantCultureIgnoreCase))
@@ -710,7 +697,7 @@ namespace VMProvisioningAgent
             return VM.AddDevice(NIC);
         }
 
-        public static bool SetSerialPort(ManagementObject VM, string PipeName, int PortNumber = 1)
+        public static bool SetSerialPort(this ManagementObject VM, string PipeName, int PortNumber = 1)
         {
             // Sanity Check
             if (VM == null || !VM["__CLASS"].ToString().Equals(VMStrings.ComputerSystem, StringComparison.InvariantCultureIgnoreCase))
@@ -726,6 +713,16 @@ namespace VMProvisioningAgent
 
             SP["Connection"] = new string[] {PipeName};
             return VM.ModifyDevice(SP);
+        }
+
+        public static bool DestroyVM(this ManagementObject VM)
+        {
+            if (VM == null)
+                return false;
+            var MgmtSvc = GetServiceObject(GetScope(VM), ServiceNames.VSManagement);
+            ManagementObject Job = new ManagementObject();
+            var result = (int)MgmtSvc.InvokeMethod("DestroyVirtualSystem", new object[] {VM.GetText(TextFormat.WmiDtd20), Job});
+            return (result == (int)ReturnCodes.OK || WaitForJob(Job) == 0);
         }
     }
 

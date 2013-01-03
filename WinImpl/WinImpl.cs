@@ -210,7 +210,7 @@ namespace WinImpl
                     if (mountStatus == false)
                         return false;
                 }
-                userFileRoot = arr.Where(s => LocateUserRoot(s + @"\") != null).FirstOrDefault();
+                userFileRoot = arr.FirstOrDefault(s => LocateUserRoot(s + @"\") != null);
             }
             else
             {
@@ -294,7 +294,7 @@ namespace WinImpl
                     if (mountStatus == false)
                         return false;
                 }
-                winRoot = arr.Where(s => DetectWindows(s + @"\") != null).FirstOrDefault();
+                winRoot = arr.FirstOrDefault(s => DetectWindows(s + @"\") != null);
             }
             else
             {
@@ -388,7 +388,7 @@ namespace WinImpl
                     if (mountStatus == false)
                         return null;
                 }
-                userFileRoot = arr.Where(s => LocateUserRoot(s + @"\") != null).FirstOrDefault();
+                userFileRoot = arr.FirstOrDefault(s => LocateUserRoot(s + @"\") != null);
             }
             else
             {
@@ -471,7 +471,7 @@ namespace WinImpl
                     if (mountStatus == false)
                         return null;
                 }
-                winRoot = arr.Where(s => DetectWindows(s + @"\") != null).FirstOrDefault();
+                winRoot = arr.FirstOrDefault(s => DetectWindows(s + @"\") != null);
             }
             else
             {
@@ -566,10 +566,11 @@ namespace WinImpl
             if (VHD == null)
                 return null;
             List<string> ret = new List<string>();
-            var image = new ManagementObjectSearcher(Utility.GetScope(), new SelectQuery(Utility.DiskStrings.MountedStorage)).Get()
-                            .Cast<ManagementObject>()
-                            .Where(Obj => (Obj["Name"].ToString().Equals(VHD, StringComparison.InvariantCultureIgnoreCase)))
-                            .FirstOrDefault();
+            var image = new ManagementObjectSearcher(Utility.GetScope(),
+                                                     new SelectQuery(Utility.DiskStrings.MountedStorage)).Get()
+                                                                                                         .Cast<ManagementObject>()
+                                                                                                         .FirstOrDefault(Obj => (Obj["Name"].ToString()
+                                                                                                                                            .Equals(VHD, StringComparison.InvariantCultureIgnoreCase)));
             var baseScope = new ManagementScope(@"root\cimv2");
             baseScope.Connect();
             var disk = new ManagementObjectSearcher(baseScope,

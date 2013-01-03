@@ -1,11 +1,13 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 11.00
-# Visual Studio 2010
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2012
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VMProvisioningAgent", "VMProvisioningAgent.csproj", "{4B4EEBBB-F1FF-4628-B55E-17F9C36C4EA4}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinImpl", "WinImpl\WinImpl.csproj", "{F4C368E6-89DF-4239-B4A6-335F8D73B2C8}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BaseCmdlets", "BaseCmdlets\BaseCmdlets.csproj", "{2A5881E4-3985-4E6F-A060-175C94DF1838}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "testdrv", "testdrv\testdrv.csproj", "{3D3A4170-817C-4E4E-AD42-11D52E53EDB2}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -25,6 +27,10 @@ Global
 		{2A5881E4-3985-4E6F-A060-175C94DF1838}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2A5881E4-3985-4E6F-A060-175C94DF1838}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2A5881E4-3985-4E6F-A060-175C94DF1838}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3D3A4170-817C-4E4E-AD42-11D52E53EDB2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3D3A4170-817C-4E4E-AD42-11D52E53EDB2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3D3A4170-817C-4E4E-AD42-11D52E53EDB2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3D3A4170-817C-4E4E-AD42-11D52E53EDB2}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

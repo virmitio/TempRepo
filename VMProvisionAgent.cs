@@ -142,17 +142,19 @@ namespace VMProvisioningAgent
                     var PlugTypes = plug.GetTypes();
                     foreach (Type plugType in PlugTypes)
                     {
-                        if (!(plugType is IProvisioner)) continue;
+                        
+                        if (!(plugType.FindInterfaces((t, o) => t.GetMethods().SequenceEqual(((Type)o).GetMethods()), typeof(IProvisioner))).Any()) continue;
                         if (!files.Contains(PlugFile))
                             files.Add(PlugFile);
-                        if (!types.ContainsKey(plugType.FullName))
-                            types.Add(plugType.FullName, new typedef(plugType, PlugFile));
+                        if (!types.ContainsKey(plugType.Name))
+                            types.Add(plugType.Name, new typedef(plugType, PlugFile));
                     }
                 }
-                catch (Exception)
+                catch (Exception e)
                 {
                     //TODO: 
                     //Output "Failed to load plugin file: <Path.GetFileName(PlugFile)>"
+                    throw e;
                 }
             }
             AlreadyScanned = true;
