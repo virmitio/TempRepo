@@ -405,7 +405,7 @@ namespace VMProvisioningAgent
 
         public static ManagementScope GetScope(string Server = null)
         {
-            var scope = new ManagementScope(@"\\" + Server ?? Environment.MachineName +
+            var scope = new ManagementScope(@"\\" + (Server ?? Environment.MachineName) +
                                             @"\root\virtualization");
             scope.Connect();
             return scope;

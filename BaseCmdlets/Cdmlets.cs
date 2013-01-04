@@ -11,7 +11,8 @@ namespace VMProvisioningAgent
     [Cmdlet("Provision", "VM")]
     public class ProvisionVM : RestableCmdlet<ProvisionVM>
     {
-        [Parameter(Mandatory = true, ValueFromPipeline = true)]
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
+        [Alias("VM")]
         [ValidateNotNullOrEmpty]
         public string Name;
         
@@ -20,9 +21,9 @@ namespace VMProvisioningAgent
         [Parameter][ValidateRange(0, int.MaxValue)]public int DynamicMemoryLimit = 0;
         [Parameter] [ValidateRange(1, 64)] public int Processors = 1;
         [Parameter] [ValidateRange(1, 1000)] public int CPULimit = 1000; // 100% in tenths of a percent
-        [Parameter] public string[] NIC = null;
-        [Parameter] public string[] LegacyNIC = null;
-        [Parameter] public string[] VHD = null;
+        [Parameter] public string[] NIC = {};
+        [Parameter] public string[] LegacyNIC = {};
+        [Parameter] public string[] VHD = {};
 
         protected override void ProcessRecord()
         {
@@ -48,8 +49,8 @@ namespace VMProvisioningAgent
             var SysVer = System.Environment.OSVersion;
             if (SysVer.Version.Major < 6)
             {
-                //Not running at least Vista/2008, no Hyper-V
-                WriteWarning("This command only operates on Hyper-V on Windows Server 2008 and newer.");
+                // Not running at least Vista/2008, no Hyper-V available
+                WriteWarning("This command only functions with Hyper-V on Windows Server 2008 and newer.");
                 return;
             }
             switch (SysVer.Version.Minor)
@@ -67,6 +68,16 @@ namespace VMProvisioningAgent
                     WriteWarning("Unknown version of Windows.  No action taken.");
                     return;
             }
+            // Is Hyper-V available/installed?
+            var scope = new ManagementScope(@"\\" + Environment.MachineName + @"\root");
+            scope.Connect();
+            if (!new ManagementObjectSearcher(scope, new SelectQuery("__Namespace", "Name like 'virtualization'"))
+                                              .Get().Cast<ManagementObject>().Any())
+            {
+                WriteWarning("Hyper-V not detected on this machine.  Cannot continue.");
+                return;
+            }
+
             // Common items
             // Only 8 Synthetic NICs allowed
             if (NIC.Length > 8) NIC = NIC.Take(8).ToArray();
@@ -154,5 +165,33 @@ namespace VMProvisioningAgent
         }
     }
 
+    [Cmdlet("Destroy", "VM")]
+    public class DestroyVM : RestableCmdlet<DestroyVM>
+    {
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
+        [Alias("VM")]
+        [ValidateNotNullOrEmpty]
+        public string Name;
 
+        /// <summary>
+        /// Setting this switch will attemt to delete all VHDs currently attached to the specified VM.
+        /// </summary>
+        [Parameter] public SwitchParameter DeleteVHDs = false;
+        /// <summary>
+        /// Setting this will attempt to merge all differencing VHDs in the VM to their parents, recursively.  Setting both this and DeleteVHDs will result in the VHDs and all parent VHDs to be deleted recursively.
+        /// </summary>
+        [Parameter] public SwitchParameter MergeVHDs = false;
+
+        protected override void ProcessRecord()
+        {
+            // must use this to support processing record remotely.
+            if (!string.IsNullOrEmpty(Remote))
+            {
+                ProcessRecordViaRest();
+                return;
+            }
+
+            WriteWarning("Incomplete cmdlet...");
+        }
+    }
 }
