@@ -95,8 +95,9 @@ namespace VMProvisioningAgent
             public const string ControllerIDE = "Microsoft Emulated IDE Controller";
             public const string ControllerSCSI = "Microsoft Synthetic SCSI Controller";
             public const string LegacyNIC = "Microsoft Emulated Ethernet Port";
-            public const string SyntheticNIC = "Microsoft Synthetic Ethernet Port";
             public const string SerialPort = "Microsoft Serial Port";
+            public const string SyntheticNIC = "Microsoft Synthetic Ethernet Port";
+            public const string SyntheticDisk = "Microsoft Synthetic Disk Drive";
         }
 
         public static class ServiceNames
@@ -271,20 +272,16 @@ namespace VMProvisioningAgent
                                            device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerIDE)
                                            || device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerSCSI)
                                            select device).First();
-                    ManagementObject drive = NewResource(ResourceTypes.StorageExtent, ResourceSubTypes.VHD);
-                    drive["Connection"] = SourceVHD;
-                    drive["Parent"] = ControllerDevice.Path;
-                    ManagementObject job;
-                    int ret = VM.AddDevice(drive, out job);
-                    switch (ret)
-                    {
-                        case (int)ReturnCodes.OK:
-                            return true;
-                        case (int)ReturnCodes.JobStarted:
-                            return (WaitForJob(job) == 0);
-                        default:
-                            return false;
-                    }
+                    // Need to add a Synthetic Disk Drive to connect the vhd to...
+                    ManagementObject SynDiskDefault = VM.NewResource(ResourceTypes.Disk, ResourceSubTypes.SyntheticDisk);
+                    SynDiskDefault["Parent"] = ControllerDevice.Path.Path;
+                    var SynDisk = VM.AddDevice(SynDiskDefault);
+                    if (SynDisk == null) return false;
+                    ManagementObject drive = VM.NewResource(ResourceTypes.StorageExtent, ResourceSubTypes.VHD);
+                    drive["Connection"] = new string[]{SourceVHD};
+                    drive["Parent"] = SynDisk.Path.Path;
+                    var ret = VM.AddDevice(drive);
+                    return ret != null;
                 default:
                     return false;
             }
@@ -311,33 +308,47 @@ namespace VMProvisioningAgent
             }
         }
 
-        public static bool AddDevice(this ManagementObject VM, ManagementObject Device)
+        public static ManagementObject AddDevice(this ManagementObject VM, ManagementObject Device)
         {
-            ManagementObject Job;
-            uint ret = (uint)AddDevice(VM, Device, out Job);
-            switch (ret)
-            {
-                case (int)ReturnCodes.OK:
-                    return true;
-                case (int)ReturnCodes.JobStarted:
-                    return (WaitForJob(Job) == 0);
-                default:
-                    return false;
-            }
-        }
-
-        public static int AddDevice(this ManagementObject VM, ManagementObject Device, out ManagementObject Job)
-        {
-            Job = null;
             switch (VM["__CLASS"].ToString().ToUpperInvariant())
             {
                 case "MSVM_COMPUTERSYSTEM":
                     ManagementObject ServiceObj = GetServiceObject(VM.GetScope(), ServiceNames.VSManagement);
-                    Job = new ManagementObject();
-                    return (Int32)ServiceObj.InvokeMethod("AddVirtualSystemResources",
-                                            new object[] {VM.Path, Device.GetText(TextFormat.WmiDtd20), null, Job});
+                    ManagementBaseObject inputs = ServiceObj.GetMethodParameters("AddVirtualSystemResources");
+                    inputs["TargetSystem"] = VM.Path.Path;
+                    inputs["ResourceSettingData"] = new string[]{Device.GetText(TextFormat.WmiDtd20)};
+                    var result = ServiceObj.InvokeMethod("AddVirtualSystemResources", inputs, null);
+                    switch (Int32.Parse(result["ReturnValue"].ToString()))
+                    {
+                        case (int)ReturnCodes.OK:
+                            var tmp = result["NewResources"];
+                            return GetObject(((ManagementObject[])result["NewResources"]).First()["__Path"].ToString());
+                        case (int)ReturnCodes.JobStarted:
+                            var job = GetObject(result["Job"].ToString());
+                            var r = WaitForJob(job);
+                            if (r == 0)
+                            {
+                                var res = result["NewResources"];
+                                var arr = (ManagementBaseObject[])res;
+                                var fir = arr.First();
+                                var path = fir["__Path"].ToString();
+                                var o = GetObject(path);
+                                return GetObject(((ManagementObject[])result["NewResources"]).First()["__Path"].ToString());
+                            }
+                            else
+                            {
+                                var jobres = job.InvokeMethod("GetError", new ManagementObject(), null);
+                                var errStr = jobres["Error"].ToString();
+                                var errObj = GetObject(errStr);
+                                return null;
+                            }
+                            return null;
+                        default:
+                            return null;
+                    }
+
                 default:
-                    return -1;
+                    return null;
             }
         }
 
@@ -365,7 +376,7 @@ namespace VMProvisioningAgent
                     ManagementObject ServiceObj = GetServiceObject(VM.GetScope(), ServiceNames.VSManagement);
                     Job = new ManagementObject();
                     return (Int32)ServiceObj.InvokeMethod("ModifyVirtualSystemResources",
-                                            new object[] { VM.Path, Device.GetText(TextFormat.WmiDtd20), null, Job });
+                                            new object[] { VM.Path.Path, Device.GetText(TextFormat.WmiDtd20), null, Job });
                 default:
                     return -1;
             }
@@ -373,34 +384,65 @@ namespace VMProvisioningAgent
 
         public static ManagementObject GetServiceObject(ManagementScope Scope, string ServiceName)
         {
-            return new ManagementClass(Scope, 
-                                new ManagementPath(ServiceName),
-                                null).GetInstances()
-                                     .Cast<ManagementObject>()
-                                     .FirstOrDefault();
+            var Class = new ManagementClass(Scope, new ManagementPath(ServiceName), null);
+            var instances = Class.GetInstances();
+            return instances.Cast<ManagementObject>().FirstOrDefault();
         }
 
-        public static ManagementObject NewResource(ResourceTypes ResType, string SubType, string Server = null)
+        public static ManagementObject NewResource(this ManagementObject VM, ResourceTypes ResType, string SubType, string Server = null)
         {
-            return NewResource(ResType, SubType, GetScope(Server));
+            return NewResource(VM, ResType, SubType, GetScope(Server));
         }
 
-        public static ManagementObject NewResource(ResourceTypes ResType, string SubType, ManagementScope Scope)
+        public static ManagementObject NewResource(this ManagementObject VM, ResourceTypes ResType, string SubType, ManagementScope Scope)
         {
-            var AllocCap = new ManagementObjectSearcher(Scope,
-                new SelectQuery(
-                    "MSVM_AllocationCapabilities",
-                    "ResourceType = " + ResType +
-                    " and ResourceSubType = '" + SubType + "'"
-                    )
-                ).Get().Cast<ManagementObject>().FirstOrDefault();
-            var objType = new ManagementObjectSearcher(Scope,
-                new SelectQuery(
-                    "MSVM_SettingsDefineCapabilities",
-                    "ValueRange = 0 and GroupComponent = '" + AllocCap["__Path"] + "'"
-                    )
-                ).Get().Cast<ManagementObject>().FirstOrDefault();
-            return new ManagementClass(objType["PartComponent"].ToString()).CreateInstance();
+            var AllocQuery = new SelectQuery("MSVM_AllocationCapabilities",
+                    "ResourceType = " + (ushort)ResType +" and ResourceSubType = '" + SubType + "'");
+            var AllocCap = new ManagementObjectSearcher(Scope, AllocQuery);
+            var AllocResult = AllocCap.Get().Cast<ManagementObject>().FirstOrDefault();
+            var objQuery = new SelectQuery("MSVM_SettingsDefineCapabilities",
+                    "ValueRange = 0");
+            var objType = new ManagementObjectSearcher(Scope, objQuery);
+            var objOut = objType.Get().Cast<ManagementObject>();
+            objOut = objOut.Where(each => {
+                                            return each == null ? false 
+                                                 : each["GroupComponent"] == null ? false 
+                                                 : each["GroupComponent"].ToString().Equals(AllocResult["__Path"].ToString());
+                                           });
+            var Out = objOut.First();
+            var MC = GetObject(Out["PartComponent"].ToString());
+
+            return MC;
+            /*
+            var MgmtSvc = GetServiceObject(Scope, ServiceNames.VSManagement);
+            ManagementBaseObject inputs = MgmtSvc.GetMethodParameters("AddVirtualSystemResources");
+            inputs["TargetSystem"] = VM.Path.Path;
+            inputs["ResourceSettingData"] = new []{MC.GetText(TextFormat.WmiDtd20)};
+            
+            var result = MgmtSvc.InvokeMethod("AddVirtualSystemResources", inputs, null);
+
+            switch (Int32.Parse(result["ReturnValue"].ToString()))
+            {
+                case (int)ReturnCodes.OK:
+                    var tmp = result["NewResources"];
+                    return GetObject(((ManagementObject[])result["NewResources"]).First()["__Path"].ToString());
+                case (int)ReturnCodes.JobStarted:
+                    var job = GetObject(result["Job"].ToString());
+                    var r = WaitForJob(job);
+                    if (r == 0) 
+                    {
+                        var res = result["NewResources"];
+                        var arr = (ManagementBaseObject[])res;
+                        var fir = arr.First();
+                        var path = fir["__Path"].ToString();
+                        var o = GetObject(path);
+                        return GetObject(((ManagementObject[])result["NewResources"]).First()["__Path"].ToString());
+                    }
+                    return null;
+                default:
+                    return null;
+            }
+            */
         }
 
         public static ManagementScope GetScope(string Server = null)
@@ -415,8 +457,9 @@ namespace VMProvisioningAgent
         {
             if (Item == null)
                 return null;
-            var scope = new ManagementScope(@"\\" + Item["__SERVER"] ?? Environment.MachineName +
-                                            @"\" + Item["__NAMESPACE"] ?? @"\root\virtualization");
+            string path = @"\\" + (Item["__SERVER"] ?? Environment.MachineName) + 
+                          @"\" + (Item["__NAMESPACE"] ?? @"\root\virtualization");
+            var scope = new ManagementScope(path);
             scope.Connect();
             return scope;
         }
@@ -515,20 +558,18 @@ namespace VMProvisioningAgent
             if (settings == null)
                 return null;
             settings["ElementName"] = VMName;
-            ManagementObject Comp = new ManagementObject();
-            ManagementObject Job = new ManagementObject();
-            var result = (int)MgmtSvc.InvokeMethod("DefineVirtualSystem",
-                                                           new object[]
-                                                               {
-                                                                   settings.GetText(TextFormat.WmiDtd20),
-                                                                   null, null, Comp, Job
-                                                               });
-            switch (result)
+            ManagementBaseObject inputs = MgmtSvc.GetMethodParameters("DefineVirtualSystem");
+            inputs["SystemSettingData"] = settings.GetText(TextFormat.WmiDtd20);
+            inputs["ResourceSettingData"] = null;
+            inputs["SourceSetting"] = null;
+            //var input = new object[] {settings.GetText(TextFormat.WmiDtd20), null, null, Comp, Job};
+            var result = MgmtSvc.InvokeMethod("DefineVirtualSystem", inputs, null);
+            switch (Int32.Parse(result["ReturnValue"].ToString()))
             {
                 case (int)ReturnCodes.OK:
-                    return Comp;
+                    return GetObject(result["DefinedSystem"].ToString());
                 case (int)ReturnCodes.JobStarted:
-                    return WaitForJob(Job) == 0 ? Comp : null;
+                    return WaitForJob((ManagementObject)result["Job"]) == 0 ? GetObject(result["DefinedSystem"].ToString()) : null;
                 default:
                     return null;
             }
@@ -658,7 +699,7 @@ namespace VMProvisioningAgent
             }
 
             ManagementScope scope = GetScope(VM);
-            ManagementObject NIC = NewResource(ResourceTypes.EthernetAdapter,
+            ManagementObject NIC = VM.NewResource(ResourceTypes.EthernetAdapter,
                                                (Legacy ? ResourceSubTypes.LegacyNIC : ResourceSubTypes.SyntheticNIC),
                                                scope);
             NIC["ElementName"] = (Legacy ? "Legacy " : "") + "Network Adapter";
@@ -694,7 +735,7 @@ namespace VMProvisioningAgent
                 }
                 NIC["Connection"] = new [] {Port.Path.ToString()};
             }
-            return VM.AddDevice(NIC);
+            return (VM.AddDevice(NIC) != null);
         }
 
         public static bool SetSerialPort(this ManagementObject VM, string PipeName, int PortNumber = 1)

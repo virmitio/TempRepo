@@ -32,8 +32,15 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="ClrPlus.Powershell.Core">
+      <HintPath>..\BaseCmdlets\bin\Debug\ClrPlus.Powershell.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="ServiceStack.Interfaces">
+      <HintPath>..\BaseCmdlets\bin\Debug\ServiceStack.Interfaces.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.Management.Automation, Version=1.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35, processorArchitecture=MSIL" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
@@ -45,6 +52,10 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\BaseCmdlets\BaseCmdlets.csproj">
+      <Project>{2a5881e4-3985-4e6f-a060-175c94df1838}</Project>
+      <Name>BaseCmdlets</Name>
+    </ProjectReference>
     <ProjectReference Include="..\VMProvisioningAgent.csproj">
       <Project>{4b4eebbb-f1ff-4628-b55e-17f9c36c4ea4}</Project>
       <Name>VMProvisioningAgent</Name>

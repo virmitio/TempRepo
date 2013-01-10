@@ -25,6 +25,11 @@ namespace VMProvisioningAgent
         [Parameter] public string[] LegacyNIC = {};
         [Parameter] public string[] VHD = {};
 
+        public void Go()
+        {
+            this.ProcessRecord();
+        }
+
         protected override void ProcessRecord()
         {
             // must use this to support processing record remotely.
@@ -91,7 +96,7 @@ namespace VMProvisioningAgent
             // if (DynamicMemoryLimit < 1) DynamicMemoryLimit = Memory;
 
             var VM = Utility.NewVM(Name);
-            if (!VM.ModifyVMConfig(Processors, CPULimit, Memory, DynamicMemoryLimit, DynamicMemory))
+            if (!VM.ModifyVMConfig(Processors, CPULimit, Memory, DynamicMemoryLimit>0?(int?)DynamicMemoryLimit:null, DynamicMemory))
             {
                 VM.DestroyVM();
                 WriteWarning("Error in VM creation.  See Hyper-V event log for details.");
@@ -119,12 +124,23 @@ namespace VMProvisioningAgent
             }
 
             // Attach IDE drives first
-            ManagementObject[] IDEcontrolers = VM.GetDevices()
-                  .Where(device => device["ResourceSubType"].ToString().Equals(Utility.ResourceSubTypes.ControllerIDE)).ToArray();
+            var settings = VM.GetSettings();
+            var devices = VM.GetDevices();
+            ManagementObject[] IDEcontrolers = devices.Where(device =>
+                                                {
+                                                    return device == null ? false
+                                                         : device["ResourceSubType"] == null ? false
+                                                         : device["ResourceSubType"].ToString()
+                                                                .Equals(Utility.ResourceSubTypes.ControllerIDE);
+                                                }).ToArray();
             foreach (string drive in IDE0.Where(drive => !String.IsNullOrEmpty(drive)))
-                if (!VM.AttachVHD(drive, IDEcontrolers[0])) WriteWarning("Failed to attach drive to IDE controller 0:  " + drive);
+                if (!VM.AttachVHD(drive, IDEcontrolers[0])) 
+                    try{WriteWarning("Failed to attach drive to IDE controller 0:  " + drive);}
+                    catch {}
             foreach (string drive in IDE1.Where(drive => !String.IsNullOrEmpty(drive)))
-                if (!VM.AttachVHD(drive, IDEcontrolers[1])) WriteWarning("Failed to attach drive to IDE controller 1:  " + drive);
+                if (!VM.AttachVHD(drive, IDEcontrolers[1])) 
+                    try{WriteWarning("Failed to attach drive to IDE controller 1:  " + drive);}
+                    catch { }
 
             // Attach SCSI controllers and drives
             int numCtrl = (SCSI.Length % 64 > 0) ? 1 : 0;
@@ -132,9 +148,9 @@ namespace VMProvisioningAgent
             numCtrl = Math.Min(numCtrl, 4);  // maximum of 4 SCSI controllers allowed in Hyper-V
             for (int i = 0; i < numCtrl; i++)
             {
-                var SCSIctrl = Utility.NewResource(Utility.ResourceTypes.ParallelSCSIHBA, Utility.ResourceSubTypes.ControllerSCSI,
+                var SCSIctrl = VM.NewResource(Utility.ResourceTypes.ParallelSCSIHBA, Utility.ResourceSubTypes.ControllerSCSI,
                                     VM.GetScope());
-                if (!VM.AddDevice(SCSIctrl))
+                if (VM.AddDevice(SCSIctrl)==null)
                 {
                     WriteWarning("Failed to add SCSI controller ("+i+")");
                     continue;
