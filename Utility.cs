@@ -275,11 +275,14 @@ namespace VMProvisioningAgent
                                            select device).First();
                     
                     // Locate the address on the controller we need to assign to...
+                    IEnumerable<ManagementObject> set;
                     ControllerAddress = ControllerAddress >= 0
                                             ? ControllerAddress
-                                            : (int)(VM.GetDevices().Where(each => (ushort) each["ResourceType"] == (ushort) ResourceTypes.Disk &&
+                                            : (set = (VM.GetDevices().Where(each => (ushort) each["ResourceType"] == (ushort) ResourceTypes.Disk &&
                                                                                   String.Equals(each["Parent"].ToString(), ControllerDevice.Path.Path))
-                                                                   .OrderBy(each => (int)each["Address"]).Last()["Address"]) + 1;
+                                                                   .OrderBy(each => (int)each["Address"]))).Any() 
+                                                                   ? (int)(set.Last()["Address"]) + 1
+                                                                   : 0;
 
                     // Need to add a Synthetic Disk Drive to connect the vhd to...
                     ManagementObject SynDiskDefault = VM.NewResource(ResourceTypes.Disk, ResourceSubTypes.SyntheticDisk);
