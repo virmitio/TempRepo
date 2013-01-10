@@ -261,8 +261,9 @@ namespace VMProvisioningAgent
         /// <param name="VM"></param>
         /// <param name="SourceVHD"></param>
         /// <param name="ControllerDevice">Controller device to attach to.  If null, will attach to first contoller discovered on VM.</param>
+        /// <param name="ControllerAddress">Assign VHD to this address on the Controller Device.</param>
         /// <returns></returns>
-        public static bool AttachVHD(this ManagementObject VM, string SourceVHD, ManagementObject ControllerDevice = null)
+        public static bool AttachVHD(this ManagementObject VM, string SourceVHD, ManagementObject ControllerDevice = null, int ControllerAddress = -1)
         {
             switch (VM["__CLASS"].ToString().ToUpperInvariant())
             {
@@ -272,11 +273,22 @@ namespace VMProvisioningAgent
                                            device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerIDE)
                                            || device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerSCSI)
                                            select device).First();
+                    
+                    // Locate the address on the controller we need to assign to...
+                    ControllerAddress = ControllerAddress >= 0
+                                            ? ControllerAddress
+                                            : (int)(VM.GetDevices().Where(each => (ushort) each["ResourceType"] == (ushort) ResourceTypes.Disk &&
+                                                                                  String.Equals(each["Parent"].ToString(), ControllerDevice.Path.Path))
+                                                                   .OrderBy(each => (int)each["Address"]).Last()["Address"]) + 1;
+
                     // Need to add a Synthetic Disk Drive to connect the vhd to...
                     ManagementObject SynDiskDefault = VM.NewResource(ResourceTypes.Disk, ResourceSubTypes.SyntheticDisk);
                     SynDiskDefault["Parent"] = ControllerDevice.Path.Path;
+                    SynDiskDefault["Address"] = ControllerAddress;
                     var SynDisk = VM.AddDevice(SynDiskDefault);
                     if (SynDisk == null) return false;
+
+
                     ManagementObject drive = VM.NewResource(ResourceTypes.StorageExtent, ResourceSubTypes.VHD);
                     drive["Connection"] = new string[]{SourceVHD};
                     drive["Parent"] = SynDisk.Path.Path;
