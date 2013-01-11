@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Management;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace VMProvisioningAgent
 {
@@ -138,7 +139,7 @@ namespace VMProvisioningAgent
             var VMs = new ManagementObjectSearcher(scope,
                     new SelectQuery(VMStrings.ComputerSystem, 
                                     "ProcessID >= 0 and ElementName like '" +
-                                    VMName ?? "%" + "' and Name like '" +
+                                    (VMName ?? "%") + "' and Name like '" +
                                     VMID.ToUpperInvariant() + "'")
                 );
             return VMs.Get().Cast<ManagementObject>().ToList();
@@ -260,7 +261,7 @@ namespace VMProvisioningAgent
         /// </summary>
         /// <param name="VM"></param>
         /// <param name="SourceVHD"></param>
-        /// <param name="ControllerDevice">Controller device to attach to.  If null, will attach to first contoller discovered on VM.</param>
+        /// <param name="ControllerDevice">Controller device to attach to.  If null, will attach to first available contoller discovered on VM.</param>
         /// <param name="ControllerAddress">Assign VHD to this address on the Controller Device.</param>
         /// <returns></returns>
         public static bool AttachVHD(this ManagementObject VM, string SourceVHD, ManagementObject ControllerDevice = null, int ControllerAddress = -1)
@@ -269,11 +270,32 @@ namespace VMProvisioningAgent
             {
                 case "MSVM_COMPUTERSYSTEM":
                     ControllerDevice = ControllerDevice ??
-                                       (from device in VM.GetDevices() where 
-                                           device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerIDE)
-                                           || device["ResourceSubType"].ToString().Equals(ResourceSubTypes.ControllerSCSI)
-                                           select device).First();
-                    
+                                       (VM.GetDevices()
+                                          .Where(
+                                              device =>
+                                              device["ResourceSubType"].ToString()
+                                                                       .Equals(ResourceSubTypes.ControllerIDE)
+                                              ||
+                                              device["ResourceSubType"].ToString()
+                                                                       .Equals(ResourceSubTypes.ControllerSCSI))).Where(each =>
+                                               {
+                                                   var drives =
+                                                       VM.GetDevices()
+                                                         .Where(
+                                                             dev =>
+                                                             ushort.Parse(dev["ResourceType"].ToString()) ==
+                                                             (ushort) ResourceTypes.Disk
+                                                             && String.Equals(dev["Parent"].ToString(), each.Path.Path));
+                                                   return
+                                                       each["ResourceSubType"].ToString()
+                                                                              .Equals(ResourceSubTypes.ControllerIDE)
+                                                           ? drives.Count() < 2
+                                                           : drives.Count() < 64;
+                                               })
+                                           .FirstOrDefault();
+                    if (ControllerDevice == null)
+                        return false;  // Could not locate an open controller to attach to.
+
                     // Locate the address on the controller we need to assign to...
                     IEnumerable<ManagementObject> set;
                     ControllerAddress = ControllerAddress >= 0
@@ -281,8 +303,27 @@ namespace VMProvisioningAgent
                                             : (set = (VM.GetDevices().Where(each => (ushort) each["ResourceType"] == (ushort) ResourceTypes.Disk &&
                                                                                   String.Equals(each["Parent"].ToString(), ControllerDevice.Path.Path))
                                                                    .OrderBy(each => int.Parse(each["Address"].ToString())))).Any() 
-                                                                   ? int.Parse(set.Last()["Address"].ToString()) + 1
+                                                                   ? Task<int>.Factory.StartNew(() =>
+                                                                       {
+                                                                           var set2 = set.ToArray();
+                                                                           if (
+                                                                               int.Parse(
+                                                                                   set.Last()["Address"].ToString()) ==
+                                                                               set.Count() - 1) return set.Count();
+                                                                           for (int i = 0; i < set2.Length; i++)
+                                                                           {
+                                                                               if (
+                                                                                   int.Parse(
+                                                                                       set2[i]["Address"].ToString()) >
+                                                                                   i)
+                                                                                   return i;
+                                                                           }
+                                                                           return set2.Length;
+                                                                       }, TaskCreationOptions.AttachedToParent).Result
+                                                  //int.Parse(set.Last()["Address"].ToString()) + 1
                                                                    : 0;
+
+
 
                     // Need to add a Synthetic Disk Drive to connect the vhd to...
                     ManagementObject SynDiskDefault = VM.NewResource(ResourceTypes.Disk, ResourceSubTypes.SyntheticDisk);
