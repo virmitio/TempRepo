@@ -125,6 +125,7 @@ namespace VMProvisioningAgent
             public const string MemorySettings = "MSVM_MemorySettingData";
             public const string ProcessorSettings = "MsVM_ProcessorSettingData";
             public const string VirtualSwitch = "Msvm_VirtualSwitch";
+            public const string ResourcePool = "MSVM_ResourcePool";
         }
 
         public static IEnumerable<ManagementObject> GetVM(string VMName = null, string VMID = null, string Server = null)
@@ -447,19 +448,46 @@ namespace VMProvisioningAgent
 
         public static ManagementObject NewResource(this ManagementObject VM, ResourceTypes ResType, string SubType, string Server = null)
         {
-            return NewResource(VM, ResType, SubType, GetScope(Server));
+            return NewResource(VM, ResType, SubType, Server==null?VM.GetScope():GetScope(Server));
         }
 
         public static ManagementObject NewResource(this ManagementObject VM, ResourceTypes ResType, string SubType, ManagementScope Scope)
         {
+            var pool = new ManagementObjectSearcher(Scope, new SelectQuery(VMStrings.ResourcePool,
+                                                                           "ResourceType = " + (ushort) ResType +
+                                                                           " and ResourceSubType = '" + SubType + "'"))
+                .Get().Cast<ManagementObject>().ToArray();
+
+            
+            return !pool.Any()
+                       ? null
+                       : new ManagementObject(pool.SelectMany(
+                           item =>
+                           item.GetRelated("MSVM_AllocationCapabilities")
+                               .Cast<ManagementObject>()
+                               .SelectMany(
+                                   cap =>
+                                   cap.GetRelationships("MSVM_SettingsDefineCapabilities")
+                                      .Cast<ManagementObject>()
+                                      .Where(defCap => uint.Parse(defCap["ValueRole"].ToString()) == 0))).First()["PartComponent"].ToString());
+            
+            /*
+            if (!pool.Any())
+                       return null;
+            var var1 = pool.SelectMany(item => item.GetRelated("MSVM_AllocationCapabilities").Cast<ManagementObject>());
+            var var2 = var1.SelectMany(cap =>cap.GetRelationships("MSVM_SettingsDefineCapabilities").Cast<ManagementObject>());
+            var var3 = var2.Where(defCap => uint.Parse(defCap["ValueRole"].ToString()) == 0);
+            var var4 = var3.First();
+            return var4;
+            */
+
+            /*
             var AllocQuery = new SelectQuery("MSVM_AllocationCapabilities",
                     "ResourceType = " + (ushort)ResType +" and ResourceSubType = '" + SubType + "'");
-            var AllocCap = new ManagementObjectSearcher(Scope, AllocQuery);
-            var AllocResult = AllocCap.Get().Cast<ManagementObject>().FirstOrDefault();
+            var AllocResult = new ManagementObjectSearcher(Scope, AllocQuery).Get().Cast<ManagementObject>().FirstOrDefault();
             var objQuery = new SelectQuery("MSVM_SettingsDefineCapabilities",
                     "ValueRange = 0");
-            var objType = new ManagementObjectSearcher(Scope, objQuery);
-            var objOut = objType.Get().Cast<ManagementObject>();
+            var objOut = new ManagementObjectSearcher(Scope, objQuery).Get().Cast<ManagementObject>();
             objOut = objOut.Where(each => {
                                             return each == null ? false 
                                                  : each["GroupComponent"] == null ? false 
