@@ -280,14 +280,15 @@ namespace VMProvisioningAgent
                                             ? ControllerAddress
                                             : (set = (VM.GetDevices().Where(each => (ushort) each["ResourceType"] == (ushort) ResourceTypes.Disk &&
                                                                                   String.Equals(each["Parent"].ToString(), ControllerDevice.Path.Path))
-                                                                   .OrderBy(each => (int)each["Address"]))).Any() 
-                                                                   ? (int)(set.Last()["Address"]) + 1
+                                                                   .OrderBy(each => int.Parse(each["Address"].ToString())))).Any() 
+                                                                   ? int.Parse(set.Last()["Address"].ToString()) + 1
                                                                    : 0;
 
                     // Need to add a Synthetic Disk Drive to connect the vhd to...
                     ManagementObject SynDiskDefault = VM.NewResource(ResourceTypes.Disk, ResourceSubTypes.SyntheticDisk);
                     SynDiskDefault["Parent"] = ControllerDevice.Path.Path;
                     SynDiskDefault["Address"] = ControllerAddress;
+                    SynDiskDefault["Limit"] = 1;
                     var SynDisk = VM.AddDevice(SynDiskDefault);
                     if (SynDisk == null) return false;
 
@@ -337,18 +338,17 @@ namespace VMProvisioningAgent
                     {
                         case (int)ReturnCodes.OK:
                             var tmp = result["NewResources"];
-                            return GetObject(((ManagementObject[])result["NewResources"]).First()["__Path"].ToString());
+                            return GetObject(((string[])result["NewResources"]).First());
                         case (int)ReturnCodes.JobStarted:
                             var job = GetObject(result["Job"].ToString());
                             var r = WaitForJob(job);
                             if (r == 0)
                             {
                                 var res = result["NewResources"];
-                                var arr = (ManagementBaseObject[])res;
-                                var fir = arr.First();
-                                var path = fir["__Path"].ToString();
+                                var arr = (string[])res;
+                                var path = arr.First();
                                 var o = GetObject(path);
-                                return GetObject(((ManagementObject[])result["NewResources"]).First()["__Path"].ToString());
+                                return GetObject(((string[])result["NewResources"]).First());
                             }
                             else
                             {

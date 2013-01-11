@@ -150,6 +150,7 @@ namespace VMProvisioningAgent
             {
                 var SCSIctrl = VM.NewResource(Utility.ResourceTypes.ParallelSCSIHBA, Utility.ResourceSubTypes.ControllerSCSI,
                                     VM.GetScope());
+                SCSIctrl["Limit"] = 4;
                 if (VM.AddDevice(SCSIctrl)==null)
                 {
                     WriteWarning("Failed to add SCSI controller ("+i+")");
