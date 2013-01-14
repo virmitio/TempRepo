@@ -148,10 +148,11 @@ namespace VMProvisioningAgent
             numCtrl = Math.Min(numCtrl, 4);  // maximum of 4 SCSI controllers allowed in Hyper-V
             for (int i = 0; i < numCtrl; i++)
             {
-                var SCSIctrl = VM.NewResource(Utility.ResourceTypes.ParallelSCSIHBA, Utility.ResourceSubTypes.ControllerSCSI,
+                var SCSIctrlDef = VM.NewResource(Utility.ResourceTypes.ParallelSCSIHBA, Utility.ResourceSubTypes.ControllerSCSI,
                                     VM.GetScope());
-                SCSIctrl["Limit"] = 4;
-                if (VM.AddDevice(SCSIctrl)==null)
+                SCSIctrlDef["Limit"] = 4;
+                var SCSIctrl = VM.AddDevice(SCSIctrlDef);
+                if (SCSIctrl==null)
                 {
                     WriteWarning("Failed to add SCSI controller ("+i+")");
                     continue;
