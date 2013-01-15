@@ -787,7 +787,8 @@ namespace VMProvisioningAgent
                                                (Legacy ? ResourceSubTypes.LegacyNIC : ResourceSubTypes.SyntheticNIC),
                                                scope);
             NIC["ElementName"] = (Legacy ? "Legacy " : "") + "Network Adapter";
-            NIC["VirtualSystemIdentifiers"] = Guid.NewGuid().ToString("B");
+            if (!Legacy)
+                NIC["VirtualSystemIdentifiers"] = new string[] {Guid.NewGuid().ToString("B")};
             if (VirtualSwitch != null)
             {
                 ManagementObject Switch =
@@ -801,23 +802,19 @@ namespace VMProvisioningAgent
                     return false;
                 }
                 
-                ManagementObject Port = new ManagementObject();
                 string PortGUID = Guid.NewGuid().ToString();
                 ManagementObject SwitchSvc = GetServiceObject(scope, ServiceNames.SwitchManagement);
-                uint ret = (uint)SwitchSvc.InvokeMethod("CreateSwitchPort", new object[]
-                                                                          {
-                                                                              Switch,
-                                                                              PortGUID,
-                                                                              PortGUID,
-                                                                              String.Empty,
-                                                                              Port
-                                                                          });
-                if (ret != (int)ReturnCodes.OK)
+                var inputs = SwitchSvc.GetMethodParameters("CreateSwitchPort");
+                inputs["VirtualSwitch"] = Switch.Path.Path;
+                inputs["Name"] = inputs["FriendlyName"] = PortGUID;
+                inputs["ScopeOfResidence"] = String.Empty;
+                var ret = SwitchSvc.InvokeMethod("CreateSwitchPort", inputs, null);
+                if (int.Parse(ret["ReturnValue"].ToString()) != (int)ReturnCodes.OK)
                 {
                     NIC.Delete();
                     return false;
                 }
-                NIC["Connection"] = new [] {Port.Path.ToString()};
+                NIC["Connection"] = new string[] {GetObject(ret["CreatedSwitchPort"].ToString()).Path.Path};
             }
             return (VM.AddDevice(NIC) != null);
         }

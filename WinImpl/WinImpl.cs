@@ -11,14 +11,14 @@ using VMProvisioningAgent;
 
 namespace WinImpl
 {
-    public class WinImpl : IProvisioner
+    public class WinImpl : IVMStateEditor
     {
         protected const string SysRegPostfix = @"\System32\config";
         protected static readonly List<string> VHDExtensions = new List<string>(new []{"vhd", "vhdx", "avhd", "avhdx"});
 
         public string[] MountVHD(out bool Status, string VHD, string ProxyVM = null, string AlternateInterface = null)
         {
-            if (AlternateInterface != null)
+            if (AlternateInterface != null && AlternateInterface != this.GetType().Name)
             {
                 Type Plug = PluginLoader.FindType(AlternateInterface);
                 if (Plug == null)
@@ -45,11 +45,9 @@ namespace WinImpl
             int result = Utility.WaitForJob((ManagementObject)SvcObj.InvokeMethod("Mount", new object[] { VHD }));
             if (result != 0)
             {
-                Status = false;
-                return null;
+                var tmp = GetMountPoints(VHD);
+                return (Status = tmp.Any()) ? tmp : null;
             }
-            
-            
 
             Status = true;
             return GetMountPoints(VHD);
@@ -57,7 +55,7 @@ namespace WinImpl
 
         public bool UnmountVHD(string VHD, string ProxyVM = null, string AlternateInterface = null)
         {
-            if (AlternateInterface != null)
+            if (AlternateInterface != null && AlternateInterface != this.GetType().Name)
             {
                 Type Plug = PluginLoader.FindType(AlternateInterface);
                 if (Plug == null)
@@ -78,6 +76,8 @@ namespace WinImpl
                 //TODO: Unmount to VM, then report location (if possible?)
                 throw new NotImplementedException();
             }
+            if (!GetMountPoints(VHD).Any()) // not mounted, skip to success
+                return true;
 
             ManagementObject SvcObj = Utility.GetServiceObject(Utility.GetScope(), Utility.ServiceNames.ImageManagement);
             ManagementObject result = (ManagementObject)SvcObj.InvokeMethod("Unmount", new object[] { VHD });
@@ -89,7 +89,7 @@ namespace WinImpl
             if (Location == null || Location.Equals(String.Empty))
                 return false;
 
-            if (AlternateInterface != null)
+            if (AlternateInterface != null && AlternateInterface != this.GetType().Name)
             {
                 Type Plug = PluginLoader.FindType(AlternateInterface);
                 if (Plug == null)
@@ -131,7 +131,7 @@ namespace WinImpl
         {
             // Until proven otherwise, we assume the status is 'False'
             Status = false;
-            if (AlternateInterface != null)
+            if (AlternateInterface != null && AlternateInterface != this.GetType().Name)
             {
                 Type Plug = PluginLoader.FindType(AlternateInterface);
                 if (Plug == null)
@@ -169,7 +169,7 @@ namespace WinImpl
 
         public bool WriteUserRegistry(string Root, string Username, string DataPath, object Data, string DataType, string ProxyVM = null, string AlternateInterface = null)
         {
-            if (AlternateInterface != null)
+            if (AlternateInterface != null && AlternateInterface != this.GetType().Name)
             {
                 Type Plug = PluginLoader.FindType(AlternateInterface);
                 if (Plug == null)
@@ -236,7 +236,16 @@ namespace WinImpl
             if (location == null)
                 return false;
             var parts = DataPath.Split('\\');
-            for (int i = 0; i < parts.Length - 1; i++)
+
+            // check for pathing...
+            int startIndex = 0;
+            if (parts[0].Equals("HKCU", StringComparison.InvariantCultureIgnoreCase) ||
+                parts[0].Equals("HKEY_CURRENT_USER", StringComparison.InvariantCultureIgnoreCase))
+            {
+                startIndex = 1;
+            }
+
+            for (int i = startIndex; i < parts.Length - 1; i++)
             {
                 location = location.CreateSubKey(parts[i]);
                 if (location == null)
@@ -253,7 +262,7 @@ namespace WinImpl
 
         public bool WriteMachineRegistry(string Root, string DataPath, object Data, string DataType, string ProxyVM = null, string AlternateInterface = null)
         {
-            if (AlternateInterface != null)
+            if (AlternateInterface != null && AlternateInterface != this.GetType().Name)
             {
                 Type Plug = PluginLoader.FindType(AlternateInterface);
                 if (Plug == null)
@@ -327,6 +336,18 @@ namespace WinImpl
             var location = Registry.LocalMachine.OpenSubKey(newRoot);
             if (location == null)
                 return false;
+
+            // try to be proactive about CurrentControlSet to avoid needless extra calls.
+            if (parts[partIndex + 1].Equals("CurrentControlSet", StringComparison.InvariantCultureIgnoreCase))
+            {
+                var tmpLoc = location.OpenSubKey("Select");
+                if (tmpLoc != null)
+                {
+                    uint num = (uint)tmpLoc.GetValue("Current");
+                    parts[partIndex + 1] = String.Format("ControlSet{0:000}", num);
+                }
+            }
+
             for (int i = partIndex + 1; i < parts.Length - 1; i++)
             {
                 location = location.CreateSubKey(parts[i]);
@@ -347,7 +368,7 @@ namespace WinImpl
         {
             // Until proven otherwise, we assume the status is 'False'
             Status = false;
-            if (AlternateInterface != null)
+            if (AlternateInterface != null && AlternateInterface != this.GetType().Name)
             {
                 Type Plug = PluginLoader.FindType(AlternateInterface);
                 if (Plug == null)
@@ -414,7 +435,16 @@ namespace WinImpl
             if (location == null)
                 return null;
             var parts = DataPath.Split('\\');
-            for (int i = 0; i < parts.Length - 1; i++)
+            
+            // check for pathing...
+            int startIndex = 0;
+            if (parts[0].Equals("HKCU", StringComparison.InvariantCultureIgnoreCase) ||
+                parts[0].Equals("HKEY_CURRENT_USER", StringComparison.InvariantCultureIgnoreCase))
+            {
+                startIndex = 1;
+            }
+
+            for (int i = startIndex; i < parts.Length - 1; i++)
             {
                 location = location.OpenSubKey(parts[i]);
                 if (location == null)
@@ -430,7 +460,7 @@ namespace WinImpl
         {
             // Until proven otherwise, we assume the status is 'False'
             Status = false;
-            if (AlternateInterface != null)
+            if (AlternateInterface != null && AlternateInterface != this.GetType().Name)
             {
                 Type Plug = PluginLoader.FindType(AlternateInterface);
                 if (Plug == null)
@@ -461,16 +491,12 @@ namespace WinImpl
                 // If we don't find one, return Null with Status set to 'False'
 
                 //Is this drive already mounted?
-                var arr = GetMountPoints(Root) ?? new string[0];
-                if (arr.Length == 0)
-                {
-                    //Nope, not mounted yet.  Do so now.
-                    bool mountStatus;
-                    arr = MountVHD(out mountStatus, Root);
+                bool mountStatus;
+                var arr =MountVHD(out mountStatus, Root);
 
-                    if (mountStatus == false)
-                        return null;
-                }
+                if (mountStatus == false)
+                    return null;
+
                 winRoot = arr.FirstOrDefault(s => DetectWindows(s + @"\") != null);
             }
             else
@@ -504,6 +530,18 @@ namespace WinImpl
             var location = Registry.LocalMachine.OpenSubKey(newRoot);
             if (location == null)
                 return null;
+            
+            // try to be proactive about CurrentControlSet to avoid needless extra calls.
+            if (parts[partIndex + 1].Equals("CurrentControlSet", StringComparison.InvariantCultureIgnoreCase))
+            {
+                var tmpLoc = location.OpenSubKey("Select");
+                if (tmpLoc != null)
+                {
+                    uint num = (uint)tmpLoc.GetValue("Current");
+                    parts[partIndex + 1] = String.Format("ControlSet{0:000}", num);
+                }
+            }
+
             for (int i = partIndex + 1; i < parts.Length - 1; i++)
             {
                 location = location.OpenSubKey(parts[i]);

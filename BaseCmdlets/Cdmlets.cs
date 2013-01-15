@@ -1,13 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Management;
 using System.Text;
 using System.Management.Automation;
+using System.Threading.Tasks;
 using ClrPlus.Powershell.Core.Commands;
 
 namespace VMProvisioningAgent
 {
+    internal class BaseCmdlets
+    {
+        public const string DefaultImplementation = "WinImpl";
+    }
+
     [Cmdlet("Provision", "VM")]
     public class ProvisionVM : RestableCmdlet<ProvisionVM>
     {
@@ -126,13 +133,8 @@ namespace VMProvisioningAgent
             // Attach IDE drives first
             var settings = VM.GetSettings();
             var devices = VM.GetDevices();
-            ManagementObject[] IDEcontrolers = devices.Where(device =>
-                                                {
-                                                    return device == null ? false
-                                                         : device["ResourceSubType"] == null ? false
-                                                         : device["ResourceSubType"].ToString()
-                                                                .Equals(Utility.ResourceSubTypes.ControllerIDE);
-                                                }).ToArray();
+            ManagementObject[] IDEcontrolers = devices.Where(device => device != null && (device["ResourceSubType"] != null && device["ResourceSubType"].ToString()
+                                                                                                                                                        .Equals(Utility.ResourceSubTypes.ControllerIDE))).ToArray();
             foreach (string drive in IDE0.Where(drive => !String.IsNullOrEmpty(drive)))
                 if (!VM.AttachVHD(drive, IDEcontrolers[0])) 
                     try{WriteWarning("Failed to attach drive to IDE controller 0:  " + drive);}
@@ -195,10 +197,72 @@ namespace VMProvisioningAgent
         /// Setting this switch will attemt to delete all VHDs currently attached to the specified VM.
         /// </summary>
         [Parameter] public SwitchParameter DeleteVHDs = false;
-        /// <summary>
-        /// Setting this will attempt to merge all differencing VHDs in the VM to their parents, recursively.  Setting both this and DeleteVHDs will result in the VHDs and all parent VHDs to be deleted recursively.
-        /// </summary>
-        [Parameter] public SwitchParameter MergeVHDs = false;
+        
+        protected override void ProcessRecord()
+        {
+            // must use this to support processing record remotely.
+            if (!string.IsNullOrEmpty(Remote))
+            {
+                ProcessRecordViaRest();
+                return;
+            }
+
+            var VMs = Utility.GetVM(Name).ToArray();
+            if (!VMs.Any())
+            {
+                WriteWarning(String.Format("Unable to locate VM with name: '{0}'", Name));
+                return;
+            }
+            if (VMs.Count() > 1)
+            {
+                WriteWarning(String.Format("Multiple VMs with name: '{0}'. Aborting operation.", Name));
+                return;
+            }
+
+            var VM = VMs.Single();
+            IEnumerable<string> vhds = DeleteVHDs ? VM.GetVHDs() : new string[0];
+            bool success = VM.DestroyVM();
+            if (success)
+            {                
+                foreach (string vhd in vhds)
+                {
+                    try
+                    {
+                        File.Delete(vhd);
+                    }
+                    catch (Exception)
+                    {
+                        WriteWarning(String.Format("Unable to delete vhd: '{0}'", vhd));
+                    }
+                }
+            }
+            else
+            {
+                WriteWarning(String.Format("Unable to destroy VM: '{0}'", Name));
+            }
+            WriteObject(success);
+        }
+    }
+
+    [Cmdlet(VerbsCommunications.Read, "VMRegistry", DefaultParameterSetName = "Machine")]
+    public class ReadVMRegistry : RestableCmdlet<ReadVMRegistry>
+    {
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
+        [Alias("Drive", "Root")]
+        [ValidateNotNullOrEmpty]
+        public string VHD;
+
+        [Parameter(Mandatory = true, ParameterSetName = "User")]
+        [Alias("UserName")]
+        public string User;
+
+        [Parameter(Mandatory = true)]
+        [Alias("RegistryPath")]
+        public string DataPath;
+
+        [Parameter] [Alias("Interface")]
+        public string AlternateInterface = "WinImpl";
+
 
         protected override void ProcessRecord()
         {
@@ -209,7 +273,91 @@ namespace VMProvisioningAgent
                 return;
             }
 
-            WriteWarning("Incomplete cmdlet...");
+            IVMStateEditor editor = PluginLoader.GetInterface(AlternateInterface) ?? Task<IVMStateEditor>.Factory.StartNew(() =>
+                {
+                    PluginLoader.ScanForPlugins();
+                    return PluginLoader.GetInterface(AlternateInterface);
+                }).Result;
+
+            if (editor == null)
+            {
+                ThrowTerminatingError(new ErrorRecord(new FileNotFoundException(String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.", AlternateInterface)), "Interface failed to load.", ErrorCategory.InvalidArgument, null));
+                return;
+            }
+
+            bool readStatus;
+            var value = ParameterSetName.Equals("User", StringComparison.InvariantCultureIgnoreCase)
+                            ? editor.ReadUserRegistry(out readStatus, VHD, User, DataPath)
+                            : editor.ReadMachineRegistry(out readStatus, VHD, DataPath);
+            
+            WriteObject(new
+                {
+                    Value = value,
+                    Status = readStatus
+                });
         }
     }
+
+    [Cmdlet(VerbsCommunications.Write, "VMRegistry", DefaultParameterSetName = "Machine")]
+    public class WriteVMRegistry : RestableCmdlet<WriteVMRegistry>
+    {
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
+        [Alias("Drive", "Root")]
+        [ValidateNotNullOrEmpty]
+        public string VHD;
+
+        [Parameter(Mandatory = true, ParameterSetName = "User")]
+        [Alias("UserName")]
+        public string User;
+
+        [Parameter(Mandatory = true)]
+        [Alias("RegistryPath")]
+        public string DataPath;
+
+        [Parameter(Mandatory = true)]
+        [Alias("RegistryPath")]
+        public object Data;
+
+        [Parameter]
+        [Alias("RegistryPath")]
+        public string DataType = "string";
+
+        [Parameter]
+        [Alias("Interface")]
+        public string AlternateInterface = "WinImpl";
+
+
+        protected override void ProcessRecord()
+        {
+            // must use this to support processing record remotely.
+            if (!string.IsNullOrEmpty(Remote))
+            {
+                ProcessRecordViaRest();
+                return;
+            }
+
+            IVMStateEditor editor = PluginLoader.GetInterface(AlternateInterface) ?? Task<IVMStateEditor>.Factory.StartNew(() =>
+            {
+                PluginLoader.ScanForPlugins();
+                return PluginLoader.GetInterface(AlternateInterface);
+            }).Result;
+
+            if (editor == null)
+            {
+                ThrowTerminatingError(new ErrorRecord(new FileNotFoundException(String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.", AlternateInterface)), "Interface failed to load.", ErrorCategory.InvalidArgument, null));
+                return;
+            }
+
+            WriteObject(
+                ParameterSetName.Equals("User", StringComparison.InvariantCultureIgnoreCase)
+                            ? editor.WriteUserRegistry(VHD, User, DataPath, Data, DataType)
+                            : editor.WriteMachineRegistry(VHD, DataPath, Data, DataType)
+                );
+        }
+    }
+
+
+    // Mount-VMVHD
+    // Unmount-VMVHD
+
 }

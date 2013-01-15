@@ -8,7 +8,7 @@ using System.Text;
 
 namespace VMProvisioningAgent
 {
-    public interface IProvisioner
+    public interface IVMStateEditor
     {
         /// <summary>
         /// 
@@ -124,6 +124,15 @@ namespace VMProvisioningAgent
             return null;
         }
 
+        public static IVMStateEditor GetInterface(string Name)
+        {
+            if (Name == null)
+                return null;
+            if (types.ContainsKey(Name))
+                return (IVMStateEditor)(Activator.CreateInstance(types[Name].Type));
+            return null;
+        }
+
         public static void ScanForPlugins(bool Force = false, string path = null)
         {
             if (AlreadyScanned && !Force)
@@ -131,8 +140,8 @@ namespace VMProvisioningAgent
             files.Clear();
             types.Clear();
 
-            string PlugPath = path ??
-                           Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Plugins");
+//          string PlugPath = path ?? Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Plugins");
+            string PlugPath = path ?? Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
             string[] Plugs = Directory.GetFiles(PlugPath, "*.dll");
             foreach (string PlugFile in Plugs)
             {
@@ -143,7 +152,7 @@ namespace VMProvisioningAgent
                     foreach (Type plugType in PlugTypes)
                     {
                         
-                        if (!(plugType.FindInterfaces((t, o) => t.GetMethods().SequenceEqual(((Type)o).GetMethods()), typeof(IProvisioner))).Any()) continue;
+                        if (!(plugType.FindInterfaces((t, o) => t.GetMethods().SequenceEqual(((Type)o).GetMethods()), typeof(IVMStateEditor))).Any()) continue;
                         if (!files.Contains(PlugFile))
                             files.Add(PlugFile);
                         if (!types.ContainsKey(plugType.Name))
