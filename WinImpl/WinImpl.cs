@@ -192,6 +192,7 @@ namespace WinImpl
             }
 
             string userFileRoot = null;
+            bool mountStatus = false;
             if (Path.HasExtension(Root) &&
                 VHDExtensions.Contains(Path.GetExtension(Root), StringComparer.InvariantCultureIgnoreCase))
             {
@@ -204,7 +205,6 @@ namespace WinImpl
                 if (arr.Length == 0)
                 {
                     //Nope, not mounted yet.  Do so now.
-                    bool mountStatus;
                     arr = MountVHD(out mountStatus, Root);
 
                     if (mountStatus == false)
@@ -257,6 +257,8 @@ namespace WinImpl
             else
                 location.SetValue(parts[parts.Length - 1], Data);
             RegExtra.UnloadHive(RegistryHive.LocalMachine, hiveFile);
+            if (mountStatus)
+                UnmountVHD(Root);
             return true;
         }
 
@@ -285,6 +287,7 @@ namespace WinImpl
             }
 
             string winRoot = null;
+            bool mountStatus = false;
             if (Path.HasExtension(Root) &&
                 VHDExtensions.Contains(Path.GetExtension(Root), StringComparer.InvariantCultureIgnoreCase))
             {
@@ -297,7 +300,6 @@ namespace WinImpl
                 if (arr.Length == 0)
                 {
                     //Nope, not mounted yet.  Do so now.
-                    bool mountStatus;
                     arr = MountVHD(out mountStatus, Root);
 
                     if (mountStatus == false)
@@ -361,6 +363,8 @@ namespace WinImpl
             else
                 location.SetValue(parts[parts.Length - 1], Data);
             RegExtra.UnloadHive(RegistryHive.LocalMachine, hiveFile);
+            if (mountStatus)
+                UnmountVHD(Root);
             return true;
         }
 
@@ -391,6 +395,7 @@ namespace WinImpl
             }
 
             string userFileRoot = null;
+            bool mountStatus = false;
             if (Path.HasExtension(Root) &&
                 VHDExtensions.Contains(Path.GetExtension(Root), StringComparer.InvariantCultureIgnoreCase))
             {
@@ -403,7 +408,6 @@ namespace WinImpl
                 if (arr.Length == 0)
                 {
                     //Nope, not mounted yet.  Do so now.
-                    bool mountStatus;
                     arr = MountVHD(out mountStatus, Root);
 
                     if (mountStatus == false)
@@ -453,6 +457,8 @@ namespace WinImpl
             var retval = location.GetValue(parts[parts.Length - 1]);
             Status = true;
             RegExtra.UnloadHive(RegistryHive.LocalMachine, hiveFile);
+            if (mountStatus)
+                UnmountVHD(Root);
             return retval;
         }
 
@@ -483,6 +489,7 @@ namespace WinImpl
             }
 
             string winRoot = null;
+            bool mountStatus = false;
             if (Path.HasExtension(Root) &&
                 VHDExtensions.Contains(Path.GetExtension(Root), StringComparer.InvariantCultureIgnoreCase))
             {
@@ -491,7 +498,6 @@ namespace WinImpl
                 // If we don't find one, return Null with Status set to 'False'
 
                 //Is this drive already mounted?
-                bool mountStatus;
                 var arr =MountVHD(out mountStatus, Root);
 
                 if (mountStatus == false)
@@ -551,6 +557,8 @@ namespace WinImpl
             var retval = location.GetValue(parts[parts.Length - 1]);
             Status = true;
             RegExtra.UnloadHive(RegistryHive.LocalMachine, hiveFile);
+            if (mountStatus)
+                UnmountVHD(Root);
             return retval;
         }
 

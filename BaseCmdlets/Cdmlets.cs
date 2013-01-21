@@ -358,6 +358,66 @@ namespace VMProvisioningAgent
 
 
     // Mount-VMVHD
-    // Unmount-VMVHD
+    [Cmdlet(VerbsData.Mount, "VMVHD")]
+    public class MountVMVHD : RestableCmdlet<MountVMVHD>
+    {
+        protected override void ProcessRecord()
+        {
+            // must use this to support processing record remotely.
+            if (!string.IsNullOrEmpty(Remote))
+            {
+                ProcessRecordViaRest();
+                return;
+            }
 
+            IVMStateEditor IF = PluginLoader.GetInterface(AlternateInterface) ?? Task<IVMStateEditor>.Factory.StartNew(() =>
+            {
+                PluginLoader.ScanForPlugins();
+                return PluginLoader.GetInterface(AlternateInterface);
+            }).Result;
+
+            base.ProcessRecord();
+        }
+    }
+
+    // Unmount-VMVHD
+    [Cmdlet(VerbsData.Dismount, "VMVHD")]
+    public class DismountVMVHD : RestableCmdlet<DismountVMVHD>
+    {
+        protected override void ProcessRecord()
+        {
+            // must use this to support processing record remotely.
+            if (!string.IsNullOrEmpty(Remote))
+            {
+                ProcessRecordViaRest();
+                return;
+            }
+
+            IVMStateEditor IF = PluginLoader.GetInterface(AlternateInterface) ?? Task<IVMStateEditor>.Factory.StartNew(() =>
+            {
+                PluginLoader.ScanForPlugins();
+                return PluginLoader.GetInterface(AlternateInterface);
+            }).Result;
+
+            base.ProcessRecord();
+        }
+
+    }
+
+
+    [Cmdlet(VerbsData.Compare, "VHD")]
+    public class CompareVHD : RestableCmdlet<CompareVHD>
+    {
+        protected override void ProcessRecord()
+        {
+            // must use this to support processing record remotely.
+            if (!string.IsNullOrEmpty(Remote))
+            {
+                ProcessRecordViaRest();
+                return;
+            }
+
+            base.ProcessRecord();
+        }
+    }
 }
