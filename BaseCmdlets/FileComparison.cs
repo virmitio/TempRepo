@@ -54,7 +54,7 @@ namespace VMProvisioningAgent
             if (!HaveCompared || Force)
             {
                 Files.Clear();
-                Files = Compare(String.Empty, SourceA, SourceB, Recursive);
+                Files = Compare(String.Empty, SourceA, SourceB, Recursive, Style);
             }
             HaveCompared = true;
         }
@@ -97,7 +97,10 @@ namespace VMProvisioningAgent
             return Working.ToDictionary(item => item.Key, item => item.Value.sideB == null ? FileCondition.OnlyA : item.Value.sideA == null ? FileCondition.OnlyB 
                                                                                            // Check ComparisonStyle
                                                                                            : style == ComparisonStyle.NameOnly ? (item.Value.sideA.Length != item.Value.sideB.Length ? FileCondition.Diff : FileCondition.Same) 
-                                                                                           : style == ComparisonStyle.BinaryOnly ? (item.Value.sideA.Length != item.Value.sideB.Length ? FileCondition.Diff : FilesMatch(item.Value.sideA, item.Value.sideB) ? FileCondition.Same : FileCondition.Diff) 
+                                                                                           : style == ComparisonStyle.BinaryOnly ? (item.Value.sideA.Length != item.Value.sideB.Length 
+                                                                                                                                                            ? FileCondition.Diff 
+                                                                                                                                                            : FilesMatch(item.Value.sideA, item.Value.sideB) ? FileCondition.Same 
+                                                                                                                                                                                                             : FileCondition.Diff) 
                                                                                            : item.Value.sideA.LastWriteTimeUtc > item.Value.sideB.LastWriteTimeUtc ? FileCondition.NewerA 
                                                                                            : item.Value.sideA.LastWriteTimeUtc < item.Value.sideB.LastWriteTimeUtc ? FileCondition.NewerB 
                                                                                            : item.Value.sideA.Length != item.Value.sideB.Length ? FileCondition.Diff 
