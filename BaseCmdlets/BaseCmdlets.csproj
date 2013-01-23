@@ -90,6 +90,7 @@
     <Compile Include="Cdmlets.cs" />
     <Compile Include="FileComparison.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="RegistryComparison.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

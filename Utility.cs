@@ -892,8 +892,6 @@ namespace VMProvisioningAgent
         public const uint SE_PRIVILEGE_ENABLED = 0x00000002;
         public const string SE_RESTORE_NAME = "SeRestorePrivilege";
         public const string SE_BACKUP_NAME = "SeBackupPrivilege";
-        //        public string shortname;
-        //        private bool unloaded = false;
 
         /// <summary>
         /// 

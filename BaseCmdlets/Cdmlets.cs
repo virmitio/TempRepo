@@ -261,7 +261,7 @@ namespace VMProvisioningAgent
         public string DataPath;
 
         [Parameter] [Alias("Interface")]
-        public string AlternateInterface = "WinImpl";
+        public string AlternateInterface = BaseCmdlets.DefaultImplementation;
 
 
         protected override void ProcessRecord()
@@ -324,7 +324,7 @@ namespace VMProvisioningAgent
 
         [Parameter]
         [Alias("Interface")]
-        public string AlternateInterface = "WinImpl";
+        public string AlternateInterface = BaseCmdlets.DefaultImplementation;
 
 
         protected override void ProcessRecord()
