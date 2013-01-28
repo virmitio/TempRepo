@@ -33,6 +33,8 @@ namespace VMProvisioningAgent
             }
         }
 
+        public enum Side { A, B }
+
         private readonly Hive hiveA, hiveB;
         public string HiveA { get { return hiveA.file; } }
         public string HiveB { get { return hiveB.file; } }

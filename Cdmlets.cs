@@ -7,7 +7,7 @@ using System.Management.Automation.Runspaces;
 using System.Text;
 using System.Management.Automation;
 using System.Threading.Tasks;
-using ClrPlus.Powershell.Core.Commands;
+using ClrPlus.Powershell.Rest.Commands;
 
 namespace VMProvisioningAgent
 {
@@ -41,7 +41,7 @@ namespace VMProvisioningAgent
         protected override void ProcessRecord()
         {
             // must use this to support processing record remotely.
-            if (!string.IsNullOrEmpty(Remote))
+            if (Remote)
             {
                 ProcessRecordViaRest();
                 return;
@@ -202,7 +202,7 @@ namespace VMProvisioningAgent
         protected override void ProcessRecord()
         {
             // must use this to support processing record remotely.
-            if (!string.IsNullOrEmpty(Remote))
+            if (Remote)
             {
                 ProcessRecordViaRest();
                 return;
@@ -268,7 +268,7 @@ namespace VMProvisioningAgent
         protected override void ProcessRecord()
         {
             // must use this to support processing record remotely.
-            if (!string.IsNullOrEmpty(Remote))
+            if (Remote)
             {
                 ProcessRecordViaRest();
                 return;
@@ -331,7 +331,7 @@ namespace VMProvisioningAgent
         protected override void ProcessRecord()
         {
             // must use this to support processing record remotely.
-            if (!string.IsNullOrEmpty(Remote))
+            if (Remote)
             {
                 ProcessRecordViaRest();
                 return;
@@ -382,7 +382,7 @@ namespace VMProvisioningAgent
         protected override void ProcessRecord()
         {
             // must use this to support processing record remotely.
-            if (!string.IsNullOrEmpty(Remote))
+            if (Remote)
             {
                 ProcessRecordViaRest();
                 return;
@@ -433,7 +433,7 @@ namespace VMProvisioningAgent
         protected override void ProcessRecord()
         {
             // must use this to support processing record remotely.
-            if (!string.IsNullOrEmpty(Remote))
+            if (Remote)
             {
                 ProcessRecordViaRest();
                 return;
@@ -464,7 +464,7 @@ namespace VMProvisioningAgent
         protected override void ProcessRecord()
         {
             // must use this to support processing record remotely.
-            if (!string.IsNullOrEmpty(Remote))
+            if (Remote)
             {
                 ProcessRecordViaRest();
                 return;

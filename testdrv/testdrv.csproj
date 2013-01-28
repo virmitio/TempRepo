@@ -32,6 +32,9 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="ClrPlus">
+      <HintPath>..\packages\ClrPlus.1.8.0.54\lib\net40\ClrPlus.dll</HintPath>
+    </Reference>
     <Reference Include="ClrPlus.Powershell.Core">
       <HintPath>..\BaseCmdlets\bin\Debug\ClrPlus.Powershell.Core.dll</HintPath>
     </Reference>
@@ -52,10 +55,6 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\BaseCmdlets\BaseCmdlets.csproj">
-      <Project>{2a5881e4-3985-4e6f-a060-175c94df1838}</Project>
-      <Name>BaseCmdlets</Name>
-    </ProjectReference>
     <ProjectReference Include="..\VMProvisioningAgent.csproj">
       <Project>{4b4eebbb-f1ff-4628-b55e-17f9c36c4ea4}</Project>
       <Name>VMProvisioningAgent</Name>

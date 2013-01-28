@@ -76,8 +76,11 @@ namespace WinImpl
                 //TODO: Unmount to VM, then report location (if possible?)
                 throw new NotImplementedException();
             }
-            if (!GetMountPoints(VHD).Any()) // not mounted, skip to success
-                return true;
+            if (!GetMountPoints(VHD).Any()) // not mounted.  Is this a path on a drive to be unmounted?
+                if (!Utility.PathIsFromVHD(VHD)) // not a VHD path, skip to success
+                    return true;
+                else
+                    VHD = Utility.PathToVHD(VHD);
 
             ManagementObject SvcObj = Utility.GetServiceObject(Utility.GetScope(), Utility.ServiceNames.ImageManagement);
             ManagementObject result = (ManagementObject)SvcObj.InvokeMethod("Unmount", new object[] { VHD });
@@ -617,6 +620,8 @@ namespace WinImpl
                                                                                                          .Cast<ManagementObject>()
                                                                                                          .FirstOrDefault(Obj => (Obj["Name"].ToString()
                                                                                                                                             .Equals(VHD, StringComparison.InvariantCultureIgnoreCase)));
+            if (image == null)
+                return new string[0];
             var baseScope = new ManagementScope(@"root\cimv2");
             baseScope.Connect();
             var disk = new ManagementObjectSearcher(baseScope,
