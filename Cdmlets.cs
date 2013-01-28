@@ -461,6 +461,25 @@ namespace VMProvisioningAgent
     [Cmdlet(VerbsData.Compare, "VHD")]
     public class CompareVHD : RestableCmdlet<CompareVHD>
     {
+        [Parameter(Mandatory = true, Position = 0)]
+        [ValidateNotNullOrEmpty]
+        public string VHD0;
+
+        [Parameter(Mandatory = true, Position = 1)]
+        [ValidateNotNullOrEmpty]
+        public string VHD1;
+
+        [Parameter(Mandatory = true, Position = 2)]
+        [ValidateNotNullOrEmpty]
+        public string OutputRoot;
+
+        [Parameter]
+        public SwitchParameter Registry;
+
+        [Parameter]
+        [Alias("Interface")]
+        public string AlternateInterface = BaseCmdlets.DefaultImplementation;
+
         protected override void ProcessRecord()
         {
             // must use this to support processing record remotely.
@@ -470,8 +489,61 @@ namespace VMProvisioningAgent
                 return;
             }
 
+            // Am I working with existing paths or vhd files?
+            string[] exts = new string[] {"vhd", "avhd","vhdx","avhdx"};
+            bool IsFile0 = exts.Contains((Path.GetExtension(VHD0) ?? String.Empty), StringComparer.InvariantCultureIgnoreCase);
+            bool IsFile1 = exts.Contains((Path.GetExtension(VHD1) ?? String.Empty), StringComparer.InvariantCultureIgnoreCase);
 
-            base.ProcessRecord();
+            IVMStateEditor IF = null;
+            if (IsFile0 || IsFile1)
+            {
+                IF = PluginLoader.GetInterface(AlternateInterface) ?? Task<IVMStateEditor>.Factory.StartNew(() =>
+                {
+                    PluginLoader.ScanForPlugins();
+                    return PluginLoader.GetInterface(AlternateInterface);
+                }).Result;
+
+                if (IF == null)
+                {
+                    ThrowTerminatingError(new ErrorRecord(new FileNotFoundException(String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.", AlternateInterface)), "Interface failed to load.", ErrorCategory.InvalidArgument, null));
+                    return;
+                }
+            }
+
+            bool status0 = false;
+            bool status1 = false;
+            string[] loc0 = IsFile0 ? IF.MountVHD(out status0, VHD0) : new[] {VHD0};
+            if (!status0)
+                ThrowTerminatingError(new ErrorRecord(new Exception(String.Format("Unable to mount VHD file: '{0}'.", VHD0)), "Failed to mount VHD.", ErrorCategory.OpenError, null));
+            string[] loc1 = IsFile1 ? IF.MountVHD(out status1, VHD1) : new[] { VHD1 };
+            if (!status1)
+                ThrowTerminatingError(new ErrorRecord(new Exception(String.Format("Unable to mount VHD file: '{0}'.", VHD1)), "Failed to mount VHD.", ErrorCategory.OpenError, null));
+            if (!(status0 && status1))
+                return;
+
+            int numDrives;
+            if (loc0.Length != loc1.Length)
+            {
+                WriteWarning("Number of volumes/partitions not identical between compare targets.  Only first drive/path will be compared.");
+                numDrives = 1;
+            }
+            else
+            {
+                numDrives = loc0.Length;
+            }
+
+            for (int i = 0; i < numDrives; i++)
+            {
+                var comp = new FileComparison(loc0[i] + @"\", loc1[i] + @"\", true);
+                comp.DoCompare(FileComparison.ComparisonStyle.Normal);
+                var files = comp.DiffB().Union(comp.NewerB()).Union(comp.OnlyB());
+
+                // Yank registry files (if present) before writing...
+
+                // write to the ouput location here...
+            }
+
+            // Do registry here if needed...
         }
     }
 }

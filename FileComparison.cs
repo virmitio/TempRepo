@@ -179,10 +179,24 @@ namespace VMProvisioningAgent
                   .Select(kvp => new FileInfo(Path.Combine(FC.SourceB, kvp.Key)));
         }
 
-        public static IEnumerable<FileInfo> Different(this FileComparison FC)
+        public static IEnumerable<FileInfo> DiffA(this FileComparison FC)
         {
             return
                 FC.Files.Where(kvp => kvp.Value == FileComparison.FileCondition.Diff)
+                  .Select(kvp => new FileInfo(Path.Combine(FC.SourceA, kvp.Key)));
+        }
+
+        public static IEnumerable<FileInfo> DiffB(this FileComparison FC)
+        {
+            return
+                FC.Files.Where(kvp => kvp.Value == FileComparison.FileCondition.Diff)
+                  .Select(kvp => new FileInfo(Path.Combine(FC.SourceB, kvp.Key)));
+        }
+
+        public static IEnumerable<FileInfo> Same(this FileComparison FC)
+        {
+            return
+                FC.Files.Where(kvp => kvp.Value == FileComparison.FileCondition.Same)
                   .Select(kvp => new FileInfo(Path.Combine(FC.SourceA, kvp.Key)));
         }
 
