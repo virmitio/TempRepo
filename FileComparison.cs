@@ -34,7 +34,7 @@ namespace VMProvisioningAgent
         public string SourceB { get; private set; }
         public bool Recursive { get; private set; }
         public Dictionary<string, FileCondition> Files { get; private set; }
-        private bool HaveCompared;
+        private bool HaveCompared = false;
 
         public FileComparison(string SideA, string SideB, bool RecurseDirectories)
         {

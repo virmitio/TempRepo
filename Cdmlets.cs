@@ -7,6 +7,7 @@ using System.Management;
 using System.Management.Automation.Runspaces;
 using System.Text;
 using System.Management.Automation;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ClrPlus.Powershell.Rest.Commands;
 
@@ -15,6 +16,16 @@ namespace VMProvisioningAgent
     internal class BaseCmdlets
     {
         public const string DefaultImplementation = "WinImpl";
+        public static readonly Regex[] RegistryFiles = new Regex[]
+            {
+                new Regex(@"^.*\\system32\\config\\.+$"), 
+                new Regex(@"^.*\\documents and settings\\[^\\]+\\ntuser.dat$"), 
+                new Regex(@"^.*\\users\\[^\\]+\\ntuser.dat$"), 
+            };
+
+        public static readonly Regex SystemRegistry = new Regex(@"^.*\\system32\\config\\SYSTEM$");
+        public static readonly Regex SoftwareRegistry = new Regex(@"^.*\\system32\\config\\SOFTWARE$");
+        public static readonly Regex UserRegistry = new Regex(@"^.*\\users\\(?<user>[^\\]+)\\ntuser.dat$");
     }
 
     [Cmdlet("Provision", "VM")]
@@ -478,6 +489,9 @@ namespace VMProvisioningAgent
         public SwitchParameter Registry;
 
         [Parameter]
+        public SwitchParameter Overwrite = false;
+
+        [Parameter]
         [Alias("Interface")]
         public string AlternateInterface = BaseCmdlets.DefaultImplementation;
 
@@ -491,7 +505,7 @@ namespace VMProvisioningAgent
             }
 
             // Am I working with existing paths or vhd files?
-            string[] exts = new string[] {"vhd", "avhd","vhdx","avhdx"};
+            string[] exts = new string[] {".vhd", ".avhd",".vhdx",".avhdx"};
             bool IsFile0 = exts.Contains((Path.GetExtension(VHD0) ?? String.Empty), StringComparer.InvariantCultureIgnoreCase);
             bool IsFile1 = exts.Contains((Path.GetExtension(VHD1) ?? String.Empty), StringComparer.InvariantCultureIgnoreCase);
 
@@ -506,13 +520,13 @@ namespace VMProvisioningAgent
 
                 if (IF == null)
                 {
-                    ThrowTerminatingError(new ErrorRecord(new FileNotFoundException(String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.", AlternateInterface)), "Interface failed to load.", ErrorCategory.InvalidArgument, null));
+                    ThrowTerminatingError(new ErrorRecord(new FileNotFoundException(String.Format("Unable to load the assembly containing an IVMStateEditor named '{0}'.", AlternateInterface)), "Interface failed to load.", ErrorCategory.InvalidArgument, null));
                     return;
                 }
             }
 
-            bool status0 = false;
-            bool status1 = false;
+            bool status0 = true;
+            bool status1 = true;
             string[] loc0 = IsFile0 ? IF.MountVHD(out status0, VHD0) : new[] {VHD0};
             if (!status0)
                 ThrowTerminatingError(new ErrorRecord(new Exception(String.Format("Unable to mount VHD file: '{0}'.", VHD0)), "Failed to mount VHD.", ErrorCategory.OpenError, null));
@@ -535,30 +549,58 @@ namespace VMProvisioningAgent
 
             for (int i = 0; i < numDrives; i++)
             {
+                List<FileInfo> RegFiles = new List<FileInfo>();
                 var comp = new FileComparison(loc0[i] + @"\", loc1[i] + @"\", true);
                 comp.DoCompare(FileComparison.ComparisonStyle.Normal);
-                var files = comp.DiffB().Union(comp.NewerB()).Union(comp.OnlyB());
+                var files = (comp.DiffB().Union(comp.NewerB()).Union(comp.OnlyB())).Where(f =>
+                    {
+                        if (BaseCmdlets.RegistryFiles.Any(regex => regex.Match(f.FullName.Substring(loc1[i].Length)).Success))
+                        {
+                            RegFiles.Add(f);
+                            return false;
+                        }
+                        return true;
+                    });
 
-                IEqualityComparer<FileInfo> CompFiles = new ClrPlus.Core.Extensions.EqualityComparer<FileInfo>((a, b) =>
-                                                                                                               a
-                                                                                                                   .FullName
-                                                                                                                   .EndsWith
-                                                                                                                   (b
-                                                                                                                        .FullName,
-                                                                                                                    StringComparison
-                                                                                                                        .InvariantCultureIgnoreCase),
-                                                                                                               f =>
-                                                                                                               f
-                                                                                                                   .GetHashCode
-                                                                                                                   ());
+                // Copy files to output location
+                string OutDir = Path.Combine(OutputRoot, String.Format("Partition{0}\\Files", i));
 
-                var T = files.Contains(new FileInfo(@"System32\config\SYSTEM"), CompFiles);
+                foreach (var file in files)
+                {
+                    File.Copy(file.FullName, Path.Combine(OutDir, file.FullName.Substring(loc1[i].Length)), Overwrite);
+                }
 
+                // Do registry here if needed...
+                if (!Registry) continue;
+
+                string RegOutDir = Path.Combine(OutputRoot, String.Format("Partition{0}\\Registry", i));
+                foreach (var fileInfo in RegFiles)
+                {
+                    string baseFile = fileInfo.FullName.Substring(loc1[i].Length);
+                    var SideA = new FileInfo(Path.Combine(loc0[i], baseFile));
+                    var SideB = new FileInfo(Path.Combine(loc1[i], baseFile));
+
+                    if (!SideA.Exists || !SideB.Exists) continue;
+
+                    var reg = new RegistryComparison(SideA.FullName, SideB.FullName);
+                    reg.DoCompare();
+                    var diff = new RegDiff(reg, RegistryComparison.Side.B);
+                    if (Overwrite || !File.Exists(Path.Combine(RegOutDir, fileInfo.Name)))
+                    {
+                        var stream = new StreamWriter(File.Create(Path.Combine(RegOutDir, fileInfo.Name)));
+                        diff.WriteToStream(stream);
+                        stream.Close();
+                    }
+                }
             }
 
-            // Do registry here if needed...
 
-            throw new NotImplementedException();
+            // Unmount if we needed to mount in the first place...
+            if (IsFile0)
+                IF.UnmountVHD(VHD0);
+            if (IsFile1)
+                IF.UnmountVHD(VHD1);
+
         }
     }
 }

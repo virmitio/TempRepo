@@ -42,15 +42,22 @@ namespace WinImpl
             }
 
             ManagementObject SvcObj = Utility.GetServiceObject(Utility.GetScope(), Utility.ServiceNames.ImageManagement);
-            int result = Utility.WaitForJob((ManagementObject)SvcObj.InvokeMethod("Mount", new object[] { VHD }));
-            if (result != 0)
+            var inputs = SvcObj.GetMethodParameters("Mount");
+            inputs["Path"] = VHD;
+//            int result = Utility.WaitForJob((ManagementObject)SvcObj.InvokeMethod("Mount", new object[] { VHD }));
+            var result = SvcObj.InvokeMethod("Mount", inputs, null);
+            switch (Int32.Parse(result["ReturnValue"].ToString()))
             {
-                var tmp = GetMountPoints(VHD);
-                return (Status = tmp.Any()) ? tmp : null;
+                case (int)Utility.ReturnCodes.OK:
+                    var tmp = GetMountPoints(VHD);
+                    return (Status = tmp.Any()) ? tmp : null;
+                case (int)Utility.ReturnCodes.JobStarted:
+                    return (Status = (Utility.WaitForJob(Utility.GetObject(result["Job"].ToString())) == 0)) ? GetMountPoints(VHD) : null;
+                default:
+                    Status = false;
+                    return null;
             }
 
-            Status = true;
-            return GetMountPoints(VHD);
         }
 
         public bool UnmountVHD(string VHD, string ProxyVM = null, string AlternateInterface = null)
@@ -83,7 +90,9 @@ namespace WinImpl
                     VHD = Utility.PathToVHD(VHD);
 
             ManagementObject SvcObj = Utility.GetServiceObject(Utility.GetScope(), Utility.ServiceNames.ImageManagement);
-            ManagementObject result = (ManagementObject)SvcObj.InvokeMethod("Unmount", new object[] { VHD });
+            var inputs = SvcObj.GetMethodParameters("Unmount");
+            inputs["Path"] = VHD;
+            var result = SvcObj.InvokeMethod("Unmount", inputs, null);
             return ((int) result["ReturnValue"] == 0);
         }
 

@@ -96,6 +96,7 @@ namespace VMProvisioningAgent
                 {
                     string tmp = String.Format(@"""{0}""={1}:""", item.Key, item.Value.Type);
                     string value = item.Value.Value.ToString();
+                    var realVal = item.Value.Value;
                     switch (item.Value.Type)
                     {
                         case RegistryValueKind.Binary:
@@ -123,6 +124,51 @@ namespace VMProvisioningAgent
             Output.Write(Flatten());
         }
 
+        public bool Apply(RegistryKey Root, Action<string> Log = null)
+        {
+            if (Root == null)
+                throw new ArgumentNullException("Root");
+            bool status = true;
+            try
+            {
+                foreach (var path in Data)
+                {
+                    try
+                    {
+                        RegistryKey currentPath = path.Key.Split('\\')
+                                                      .Aggregate(Root, (current, sub) => current.CreateSubKey(sub));
+                        foreach (var item in path.Value)
+                        {
+                            try
+                            {
+                                currentPath.SetValue(item.Key, item.Value.Value, item.Value.Type);
+                            }
+                            catch (Exception e)
+                            {
+                                if (Log != null)
+                                    Log(e.Message + '\n' + e.StackTrace);
+                                status = false;
+                            }
+
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        if (Log != null)
+                            Log(e.Message + '\n' + e.StackTrace);
+                        status = false;
+                    }
+                }
+
+            }
+            catch (Exception e)
+            {
+                if (Log != null)
+                    Log(e.Message + '\n' + e.StackTrace);
+                status = false;
+            }
+            return status;
+        }
 
     }
 }

@@ -39,7 +39,7 @@ namespace VMProvisioningAgent
         public string HiveA { get { return hiveA.file; } }
         public string HiveB { get { return hiveB.file; } }
 
-        RegistryComparison(string HiveFileA, string HiveFileB)
+        public RegistryComparison(string HiveFileA, string HiveFileB)
         {
             hiveA = new Hive(HiveFileA);
             hiveB = new Hive(HiveFileB);
