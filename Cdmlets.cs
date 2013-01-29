@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -538,12 +539,26 @@ namespace VMProvisioningAgent
                 comp.DoCompare(FileComparison.ComparisonStyle.Normal);
                 var files = comp.DiffB().Union(comp.NewerB()).Union(comp.OnlyB());
 
-                // Yank registry files (if present) before writing...
+                IEqualityComparer<FileInfo> CompFiles = new ClrPlus.Core.Extensions.EqualityComparer<FileInfo>((a, b) =>
+                                                                                                               a
+                                                                                                                   .FullName
+                                                                                                                   .EndsWith
+                                                                                                                   (b
+                                                                                                                        .FullName,
+                                                                                                                    StringComparison
+                                                                                                                        .InvariantCultureIgnoreCase),
+                                                                                                               f =>
+                                                                                                               f
+                                                                                                                   .GetHashCode
+                                                                                                                   ());
 
-                // write to the ouput location here...
+                var T = files.Contains(new FileInfo(@"System32\config\SYSTEM"), CompFiles);
+
             }
 
             // Do registry here if needed...
+
+            throw new NotImplementedException();
         }
     }
 }

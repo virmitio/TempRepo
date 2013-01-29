@@ -246,14 +246,16 @@ namespace VMProvisioningAgent
         public static bool NewDifferencingDisk(string SourceVHD, string OutputVHD, string Server = null)
         {
             ManagementObject SvcObj = GetServiceObject(GetScope(Server), ServiceNames.ImageManagement);
-            ManagementObject job = new ManagementObject();
-            int result = (int)SvcObj.InvokeMethod("CreateDifferencingVirtualHardDisk", new object[] {OutputVHD, SourceVHD, job});
-            switch (result)
+            ManagementBaseObject inputs = SvcObj.GetMethodParameters("CreateDifferencingVirtualHardDisk");
+            inputs["Path"] = OutputVHD;
+            inputs["ParentPath"] = SourceVHD;
+            var result = SvcObj.InvokeMethod("CreateDifferencingVirtualHardDisk", inputs, null);
+            switch (Int32.Parse(result["ReturnValue"].ToString()))
             {
                 case (int)ReturnCodes.OK:
                     return true;
                 case (int)ReturnCodes.JobStarted:
-                    return (WaitForJob(job) == 0);
+                    return (WaitForJob(GetObject(result["Job"].ToString())) == 0);
                 default:
                     return false;
             }
