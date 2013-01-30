@@ -41,6 +41,10 @@ namespace WinImpl
                 throw new NotImplementedException();
             }
 
+            string[] drv = GetMountPoints(VHD);
+            if (drv != null && drv.Length > 0)
+                return (Status = true) ? drv : null;
+
             ManagementObject SvcObj = Utility.GetServiceObject(Utility.GetScope(), Utility.ServiceNames.ImageManagement);
             var inputs = SvcObj.GetMethodParameters("Mount");
             inputs["Path"] = VHD;
@@ -93,7 +97,7 @@ namespace WinImpl
             var inputs = SvcObj.GetMethodParameters("Unmount");
             inputs["Path"] = VHD;
             var result = SvcObj.InvokeMethod("Unmount", inputs, null);
-            return ((int) result["ReturnValue"] == 0);
+            return (Int32.Parse(result["ReturnValue"].ToString()) == 0);
         }
 
         public bool WriteFile(byte[] Data, string Location, string ProxyVM = null, string AlternateInterface = null)
@@ -642,7 +646,7 @@ namespace WinImpl
             var parts = disk.GetRelated(Utility.DiskStrings.DiskPartition);
             foreach (var drives in from ManagementObject part in parts select part.GetRelated(Utility.DiskStrings.LogicalDisk))
             {
-                ret.AddRange(from ManagementObject drive in drives select drive["DeviceID"].ToString());
+                ret.AddRange(from ManagementObject drive in drives select (drive["DeviceID"].ToString()+@"\"));
             }
             return ret.ToArray();
         }

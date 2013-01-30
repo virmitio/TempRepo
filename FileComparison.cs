@@ -62,50 +62,98 @@ namespace VMProvisioningAgent
         private static Dictionary<string, FileCondition> Compare(string root, string sideA, string sideB, bool recurse, ComparisonStyle style)
         {
             Dictionary<string, file> Working = new Dictionary<string, file>();
+            var Subs = new Dictionary<string, FileCondition>();
             
             // A-Side
             var AsideRoot = new DirectoryInfo(Path.Combine(sideA, root));
-            var Afiles = AsideRoot.GetFiles("*", recurse ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
-            foreach (FileInfo A in Afiles)
+            if (AsideRoot.Exists)
             {
-                var tmp = A.FullName.Substring(sideA.Length);
-                if (tmp.IndexOf(Path.PathSeparator) == 0)
-                    tmp = tmp.Substring(1);
-                Working.Add(tmp, new file{sideA = A});
+                var Afiles = AsideRoot.EnumerateFiles();
+                foreach (FileInfo A in Afiles)
+                {
+                    try
+                    {
+                        var tmp = A.FullName.Substring(sideA.Length);
+                        if (tmp.IndexOf(Path.PathSeparator) == 0)
+                            tmp = tmp.Substring(1);
+                        Working.Add(tmp, new file {sideA = A});
+                    }
+                    catch (Exception e)
+                    {
+                        continue;
+                    }
+                }
+                if (recurse)
+                {
+                    foreach (DirectoryInfo directory in AsideRoot.EnumerateDirectories())
+                        if (Subs != null)
+                            try
+                            {
+                                Subs = (Dictionary<string, FileCondition>) Subs.Concat(Compare(Path.Combine(root, directory.Name), sideA, sideB, recurse, style));
+                            }
+                            catch (Exception e)
+                            {
+                                continue;
+                            }
+                }
             }
 
             // B-Side
             var BsideRoot = new DirectoryInfo(Path.Combine(sideB, root));
-            var Bfiles = BsideRoot.GetFiles("*", recurse ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
-            foreach (FileInfo B in Bfiles)
+            if (BsideRoot.Exists)
             {
-                var tmp = B.FullName.Substring(sideB.Length);
-                if (tmp.IndexOf(Path.PathSeparator) == 0)
-                    tmp = tmp.Substring(1);
-                if (Working.ContainsKey(tmp))
+                var Bfiles = BsideRoot.EnumerateFiles();
+                foreach (FileInfo B in Bfiles)
                 {
-                    file F = Working[tmp];
-                    F.sideB = B;
-                    Working[tmp] = F;
+                    try
+                    {
+                        var tmp = B.FullName.Substring(sideB.Length);
+                        if (tmp.IndexOf(Path.PathSeparator) == 0)
+                            tmp = tmp.Substring(1);
+                        if (Working.ContainsKey(tmp))
+                        {
+                            file F = Working[tmp];
+                            F.sideB = B;
+                            Working[tmp] = F;
+                        }
+                        else
+                        {
+                            Working.Add(tmp, new file {sideB = B});
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        continue;
+                    }
                 }
-                else
+                if (recurse)
                 {
-                    Working.Add(tmp, new file {sideB = B});
+                    foreach (DirectoryInfo directory in BsideRoot.EnumerateDirectories())
+                        if (Subs != null)
+                            try
+                            {
+                                Subs = (Dictionary<string, FileCondition>) Subs.Concat(Compare(Path.Combine(root, directory.Name), sideA, sideB, recurse, style));
+                            }
+                            catch (Exception e)
+                            {
+                                continue;
+                            }
                 }
+
             }
 
-            return Working.ToDictionary(item => item.Key, item => item.Value.sideB == null ? FileCondition.OnlyA : item.Value.sideA == null ? FileCondition.OnlyB 
+            return (Working.ToDictionary(item => item.Key, item => item.Value.sideB == null ? FileCondition.OnlyA : item.Value.sideA == null ? FileCondition.OnlyB
                                                                                            // Check ComparisonStyle
-                                                                                           : style == ComparisonStyle.NameOnly ? (item.Value.sideA.Length != item.Value.sideB.Length ? FileCondition.Diff : FileCondition.Same) 
-                                                                                           : style == ComparisonStyle.BinaryOnly ? (item.Value.sideA.Length != item.Value.sideB.Length 
-                                                                                                                                                            ? FileCondition.Diff 
-                                                                                                                                                            : FilesMatch(item.Value.sideA, item.Value.sideB) ? FileCondition.Same 
-                                                                                                                                                                                                             : FileCondition.Diff) 
-                                                                                           : item.Value.sideA.LastWriteTimeUtc > item.Value.sideB.LastWriteTimeUtc ? FileCondition.NewerA 
-                                                                                           : item.Value.sideA.LastWriteTimeUtc < item.Value.sideB.LastWriteTimeUtc ? FileCondition.NewerB 
-                                                                                           : item.Value.sideA.Length != item.Value.sideB.Length ? FileCondition.Diff 
-                                                                                           : style == ComparisonStyle.DateTimeOnly ? FileCondition.Same 
-                                                                                           : FilesMatch(item.Value.sideA, item.Value.sideB) ? FileCondition.Same : FileCondition.Diff);
+                                                                                           : style == ComparisonStyle.NameOnly ? (item.Value.sideA.Length != item.Value.sideB.Length ? FileCondition.Diff : FileCondition.Same)
+                                                                                           : style == ComparisonStyle.BinaryOnly ? (item.Value.sideA.Length != item.Value.sideB.Length
+                                                                                                                                                            ? FileCondition.Diff
+                                                                                                                                                            : FilesMatch(item.Value.sideA, item.Value.sideB) ? FileCondition.Same
+                                                                                                                                                                                                             : FileCondition.Diff)
+                                                                                           : item.Value.sideA.LastWriteTimeUtc > item.Value.sideB.LastWriteTimeUtc ? FileCondition.NewerA
+                                                                                           : item.Value.sideA.LastWriteTimeUtc < item.Value.sideB.LastWriteTimeUtc ? FileCondition.NewerB
+                                                                                           : item.Value.sideA.Length != item.Value.sideB.Length ? FileCondition.Diff
+                                                                                           : style == ComparisonStyle.DateTimeOnly ? FileCondition.Same
+                                                                                           : FilesMatch(item.Value.sideA, item.Value.sideB) ? FileCondition.Same : FileCondition.Diff)).Concat(Subs) as Dictionary<string, FileCondition> ?? new Dictionary<string, FileCondition>();
         }
 
         private static bool FilesMatch(FileInfo A, FileInfo B)
@@ -120,8 +168,8 @@ namespace VMProvisioningAgent
             int offset = 0, numA, numB;
             while (fileA.Position < fileA.Length)
             {
-                numA = fileA.Read(buffA, offset, BufferSize);
-                numB = fileB.Read(buffB, offset, BufferSize);
+                numA = fileA.Read(buffA, 0, BufferSize);
+                numB = fileB.Read(buffB, 0, BufferSize);
                 if (numA != numB)
                 {
                     fileA.Close();

@@ -18,14 +18,14 @@ namespace VMProvisioningAgent
         public const string DefaultImplementation = "WinImpl";
         public static readonly Regex[] RegistryFiles = new Regex[]
             {
-                new Regex(@"^.*\\system32\\config\\.+$"), 
-                new Regex(@"^.*\\documents and settings\\[^\\]+\\ntuser.dat$"), 
-                new Regex(@"^.*\\users\\[^\\]+\\ntuser.dat$"), 
+                new Regex(@"^.*\\system32\\config\\.+$", RegexOptions.IgnoreCase), 
+                new Regex(@"^.*\\documents and settings\\[^\\]+\\ntuser.dat$", RegexOptions.IgnoreCase), 
+                new Regex(@"^.*\\users\\[^\\]+\\ntuser.dat$", RegexOptions.IgnoreCase), 
             };
 
-        public static readonly Regex SystemRegistry = new Regex(@"^.*\\system32\\config\\SYSTEM$");
-        public static readonly Regex SoftwareRegistry = new Regex(@"^.*\\system32\\config\\SOFTWARE$");
-        public static readonly Regex UserRegistry = new Regex(@"^.*\\users\\(?<user>[^\\]+)\\ntuser.dat$");
+        public static readonly Regex SystemRegistry = new Regex(@"^.*\\system32\\config\\SYSTEM$", RegexOptions.IgnoreCase);
+        public static readonly Regex SoftwareRegistry = new Regex(@"^.*\\system32\\config\\SOFTWARE$", RegexOptions.IgnoreCase);
+        public static readonly Regex UserRegistry = new Regex(@"^.*\\users\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
     }
 
     [Cmdlet("Provision", "VM")]
@@ -550,7 +550,7 @@ namespace VMProvisioningAgent
             for (int i = 0; i < numDrives; i++)
             {
                 List<FileInfo> RegFiles = new List<FileInfo>();
-                var comp = new FileComparison(loc0[i] + @"\", loc1[i] + @"\", true);
+                var comp = new FileComparison(loc0[i], loc1[i], true);
                 comp.DoCompare(FileComparison.ComparisonStyle.Normal);
                 var files = (comp.DiffB().Union(comp.NewerB()).Union(comp.OnlyB())).Where(f =>
                     {
@@ -567,7 +567,10 @@ namespace VMProvisioningAgent
 
                 foreach (var file in files)
                 {
-                    File.Copy(file.FullName, Path.Combine(OutDir, file.FullName.Substring(loc1[i].Length)), Overwrite);
+                    string outFile = Path.Combine(OutDir, file.FullName.Substring(loc1[i].Length));
+                    if (!Directory.Exists(Path.GetDirectoryName(outFile)))
+                        Directory.CreateDirectory(Path.GetDirectoryName(outFile));
+                    File.Copy(file.FullName, outFile, Overwrite);
                 }
 
                 // Do registry here if needed...
