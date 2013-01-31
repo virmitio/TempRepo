@@ -9,6 +9,8 @@ using System.Text;
 using System.Management.Automation;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using ClrPlus.Core.Collections;
+using ClrPlus.Platform;
 using ClrPlus.Powershell.Rest.Commands;
 
 namespace VMProvisioningAgent
@@ -551,7 +553,7 @@ namespace VMProvisioningAgent
             {
                 List<FileInfo> RegFiles = new List<FileInfo>();
                 var comp = new FileComparison(loc0[i], loc1[i], true);
-                comp.DoCompare(FileComparison.ComparisonStyle.Normal);
+                comp.DoCompare(FileComparison.ComparisonStyle.DateTimeOnly);
                 var files = (comp.DiffB().Union(comp.NewerB()).Union(comp.OnlyB())).Where(f =>
                     {
                         if (BaseCmdlets.RegistryFiles.Any(regex => regex.Match(f.FullName.Substring(loc1[i].Length)).Success))
@@ -564,14 +566,43 @@ namespace VMProvisioningAgent
 
                 // Copy files to output location
                 string OutDir = Path.Combine(OutputRoot, String.Format("Partition{0}\\Files", i));
+                XDictionary<string, Tuple<bool,string>> Symlinks = new XDictionary<string, Tuple<bool, string>>();
 
                 foreach (var file in files)
                 {
+
+                    /* This will never work
+                     * 
+                    if (file.FullName.EndsWith(FileComparison.SymLinkDecorator))
+                    {
+                        string actualName = file.FullName.Substring(0,file.FullName.Length-FileComparison.SymLinkDecorator.Length);
+                        Symlinks[actualName.Substring(loc1[i].Length)] = Symlink.GetActualPath(actualName);
+                        continue;
+                    }
+                     * 
+                     */
+                    //Doing this instead...
+                    if (Symlink.IsSymlink(file.FullName))
+                    {
+                        Symlinks[file.FullName.Substring(loc1[i].Length)] = new Tuple<bool, string>(Directory.Exists(file.FullName), Symlink.GetActualPath(file.FullName));
+                        continue;
+                    }
+
                     string outFile = Path.Combine(OutDir, file.FullName.Substring(loc1[i].Length));
                     if (!Directory.Exists(Path.GetDirectoryName(outFile)))
                         Directory.CreateDirectory(Path.GetDirectoryName(outFile));
                     File.Copy(file.FullName, outFile, Overwrite);
                 }
+
+                string SymlinkFile = Path.Combine(OutputRoot, String.Format("Partition{0}\\SYMLINKS", i));
+                if (Directory.Exists(Path.Combine(OutputRoot, String.Format("Partition{0}", i))))
+                    Directory.CreateDirectory(Path.Combine(OutputRoot, String.Format("Partition{0}", i)));
+                StreamWriter syms = new StreamWriter(SymlinkFile);
+                foreach (var link in Symlinks)
+                {
+                    syms.WriteLine((link.Value.Item1 ? @"Dir::" : @"File::") + link.Key + "="+ link.Value.Item2);
+                }
+                syms.Close();
 
                 // Do registry here if needed...
                 if (!Registry) continue;

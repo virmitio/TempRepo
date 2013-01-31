@@ -3,15 +3,19 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using ClrPlus.Core.Collections;
+using ClrPlus.Platform;
 
 namespace VMProvisioningAgent
 {
     public class FileComparison
     {
+        public const string SymLinkDecorator = @"*SymLink*";
+
         public enum ComparisonStyle
         {
             /// <summary> For each pair of files with same name, perform DateTime compare.  If identical, continue with size and Binary compare. </summary>
-            Normal,
+            Full,
             /// <summary> Only compare filenames and sizes.  If a file exists on both sides with same size, assume identical. </summary>
             NameOnly,
             /// <summary> For each pair of files with same name, compare only DateTime and size. Does not compare content. </summary>
@@ -62,7 +66,7 @@ namespace VMProvisioningAgent
         private static Dictionary<string, FileCondition> Compare(string root, string sideA, string sideB, bool recurse, ComparisonStyle style)
         {
             Dictionary<string, file> Working = new Dictionary<string, file>();
-            var Subs = new Dictionary<string, FileCondition>();
+            var Subs = new XDictionary<string, FileCondition>();
             
             // A-Side
             var AsideRoot = new DirectoryInfo(Path.Combine(sideA, root));
@@ -76,7 +80,7 @@ namespace VMProvisioningAgent
                         var tmp = A.FullName.Substring(sideA.Length);
                         if (tmp.IndexOf(Path.PathSeparator) == 0)
                             tmp = tmp.Substring(1);
-                        Working.Add(tmp, new file {sideA = A});
+                        Working.Add(tmp, new file { sideA = Symlink.IsSymlink(A.FullName) ? new FileInfo(A.FullName + SymLinkDecorator) : A });
                     }
                     catch (Exception e)
                     {
@@ -86,10 +90,21 @@ namespace VMProvisioningAgent
                 if (recurse)
                 {
                     foreach (DirectoryInfo directory in AsideRoot.EnumerateDirectories())
-                        if (Subs != null)
                             try
                             {
-                                Subs = (Dictionary<string, FileCondition>) Subs.Concat(Compare(Path.Combine(root, directory.Name), sideA, sideB, recurse, style));
+                                if (Symlink.IsSymlink(directory.FullName))
+                                {
+                                    // treat this as a file, but decorate it in the dictionary
+                                    var tmp = directory.FullName.Substring(sideA.Length) + SymLinkDecorator;
+                                    if (tmp.IndexOf(Path.PathSeparator) == 0)
+                                        tmp = tmp.Substring(1);
+                                    Working.Add(tmp, new file { sideA = new FileInfo(directory.FullName) });
+                                    continue;
+                                }
+                                foreach (var pair in Compare(Path.Combine(root, directory.Name), sideA, sideB, recurse, style))
+                                {
+                                    Subs[pair.Key] = pair.Value;
+                                }
                             }
                             catch (Exception e)
                             {
@@ -113,12 +128,12 @@ namespace VMProvisioningAgent
                         if (Working.ContainsKey(tmp))
                         {
                             file F = Working[tmp];
-                            F.sideB = B;
+                            F.sideB = Symlink.IsSymlink(B.FullName) ? new FileInfo(B.FullName + SymLinkDecorator) : B;
                             Working[tmp] = F;
                         }
                         else
                         {
-                            Working.Add(tmp, new file {sideB = B});
+                            Working.Add(tmp, new file { sideB = Symlink.IsSymlink(B.FullName) ? new FileInfo(B.FullName + SymLinkDecorator) : B });
                         }
                     }
                     catch (Exception e)
@@ -128,11 +143,31 @@ namespace VMProvisioningAgent
                 }
                 if (recurse)
                 {
-                    foreach (DirectoryInfo directory in BsideRoot.EnumerateDirectories())
-                        if (Subs != null)
+                    foreach (DirectoryInfo directory in BsideRoot.EnumerateDirectories().Except(AsideRoot.EnumerateDirectories(), new ClrPlus.Core.Extensions.EqualityComparer<DirectoryInfo>((a, b) => a.Name.Equals(b.Name), d => d.GetHashCode()))) // skip directories we've already covered from A-Side
                             try
                             {
-                                Subs = (Dictionary<string, FileCondition>) Subs.Concat(Compare(Path.Combine(root, directory.Name), sideA, sideB, recurse, style));
+                                if (Symlink.IsSymlink(directory.FullName))
+                                {
+                                    // treat this as a file, but decorate it in the dictionary
+                                    var tmp = directory.FullName.Substring(sideB.Length) + SymLinkDecorator;
+                                    if (tmp.IndexOf(Path.PathSeparator) == 0)
+                                        tmp = tmp.Substring(1);
+                                    if (Working.ContainsKey(tmp))
+                                    {
+                                        file F = Working[tmp];
+                                        F.sideB = new FileInfo(directory.FullName);
+                                        Working[tmp] = F;
+                                    }
+                                    else
+                                    {
+                                        Working.Add(tmp, new file { sideB = new FileInfo(directory.FullName) });
+                                    }
+                                    continue;
+                                }
+                                foreach (var pair in Compare(Path.Combine(root, directory.Name), sideA, sideB, recurse, style))
+                                {
+                                    Subs[pair.Key] = pair.Value;
+                                }
                             }
                             catch (Exception e)
                             {
@@ -142,7 +177,14 @@ namespace VMProvisioningAgent
 
             }
 
-            return (Working.ToDictionary(item => item.Key, item => item.Value.sideB == null ? FileCondition.OnlyA : item.Value.sideA == null ? FileCondition.OnlyB
+            XDictionary<string, FileCondition> ret = new XDictionary<string, FileCondition>(Working.ToDictionary(item => item.Key, item => item.Value.sideB == null ? FileCondition.OnlyA : item.Value.sideA == null ? FileCondition.OnlyB
+                                                                                           // Check symlinks  (these don't get resolved to their targets for comparison, only the target pointer is checked)
+                                                                                           : item.Value.sideA.FullName.EndsWith(SymLinkDecorator) ? item.Value.sideB.FullName.EndsWith(SymLinkDecorator) 
+                                                                                                                                                    ? Symlink.GetActualPath(item.Value.sideA.FullName.Substring(0,item.Value.sideA.FullName.Length-SymLinkDecorator.Length)).Equals(
+                                                                                                                                                      Symlink.GetActualPath(item.Value.sideB.FullName.Substring(0,item.Value.sideB.FullName.Length-SymLinkDecorator.Length)),StringComparison.InvariantCultureIgnoreCase)
+                                                                                                                                                        ? FileCondition.Same : FileCondition.Diff
+                                                                                                                                                    : FileCondition.Diff
+                                                                                           : item.Value.sideB.FullName.EndsWith(SymLinkDecorator) ? FileCondition.Diff
                                                                                            // Check ComparisonStyle
                                                                                            : style == ComparisonStyle.NameOnly ? (item.Value.sideA.Length != item.Value.sideB.Length ? FileCondition.Diff : FileCondition.Same)
                                                                                            : style == ComparisonStyle.BinaryOnly ? (item.Value.sideA.Length != item.Value.sideB.Length
@@ -153,12 +195,17 @@ namespace VMProvisioningAgent
                                                                                            : item.Value.sideA.LastWriteTimeUtc < item.Value.sideB.LastWriteTimeUtc ? FileCondition.NewerB
                                                                                            : item.Value.sideA.Length != item.Value.sideB.Length ? FileCondition.Diff
                                                                                            : style == ComparisonStyle.DateTimeOnly ? FileCondition.Same
-                                                                                           : FilesMatch(item.Value.sideA, item.Value.sideB) ? FileCondition.Same : FileCondition.Diff)).Concat(Subs) as Dictionary<string, FileCondition> ?? new Dictionary<string, FileCondition>();
+                                                                                           : FilesMatch(item.Value.sideA, item.Value.sideB) ? FileCondition.Same : FileCondition.Diff));
+
+            foreach (var pair in Subs)
+                ret[pair.Key] = pair.Value;
+
+            return new Dictionary<string, FileCondition>(ret);
         }
 
         private static bool FilesMatch(FileInfo A, FileInfo B)
         {
-            const int BufferSize = 256;
+            const int BufferSize = 2048;  // arbitrarily chosen buffer size
             byte[] buffA = new byte[BufferSize];
             byte[] buffB = new byte[BufferSize];
 
