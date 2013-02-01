@@ -10,7 +10,8 @@ namespace VMProvisioningAgent
 {
     public class FileComparison
     {
-        public const string SymLinkDecorator = @"*SymLink*";
+        // This needs to be valid as part of a Windows filename, but also vanishingly unlikely to be encountered at the end of an existing filename...
+        public const string SymLinkDecorator = @"%%[SYMLINK]%%";  
 
         public enum ComparisonStyle
         {
@@ -75,8 +76,12 @@ namespace VMProvisioningAgent
                 var Afiles = AsideRoot.EnumerateFiles();
                 foreach (FileInfo A in Afiles)
                 {
+                    bool bloop;
                     try
                     {
+                        if (Symlink.IsSymlink(A.FullName))
+                            bloop = true;
+
                         var tmp = A.FullName.Substring(sideA.Length);
                         if (tmp.IndexOf(Path.PathSeparator) == 0)
                             tmp = tmp.Substring(1);
@@ -120,8 +125,12 @@ namespace VMProvisioningAgent
                 var Bfiles = BsideRoot.EnumerateFiles();
                 foreach (FileInfo B in Bfiles)
                 {
+                    bool bloop;
                     try
                     {
+                        if (Symlink.IsSymlink(B.FullName))
+                            bloop = true;
+
                         var tmp = B.FullName.Substring(sideB.Length);
                         if (tmp.IndexOf(Path.PathSeparator) == 0)
                             tmp = tmp.Substring(1);
@@ -143,7 +152,13 @@ namespace VMProvisioningAgent
                 }
                 if (recurse)
                 {
-                    foreach (DirectoryInfo directory in BsideRoot.EnumerateDirectories().Except(AsideRoot.EnumerateDirectories(), new ClrPlus.Core.Extensions.EqualityComparer<DirectoryInfo>((a, b) => a.Name.Equals(b.Name), d => d.GetHashCode()))) // skip directories we've already covered from A-Side
+                    var CompareFunc = new ClrPlus.Core.Extensions.EqualityComparer<DirectoryInfo>(
+                        (a, b) => 
+                            a.Name.Equals(b.Name),   // this is not actually used
+                        d =>
+                            d.Name.GetHashCode()); // This is what is REALLY used for .Except() comparison of objects
+
+                    foreach (DirectoryInfo directory in BsideRoot.EnumerateDirectories().Except(AsideRoot.EnumerateDirectories(), CompareFunc)) // skip directories we've already covered from A-Side
                             try
                             {
                                 if (Symlink.IsSymlink(directory.FullName))

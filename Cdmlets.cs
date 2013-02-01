@@ -527,6 +527,10 @@ namespace VMProvisioningAgent
                 }
             }
 
+            //////
+            // explore possible use of DiscUtils here.......
+            //////
+
             bool status0 = true;
             bool status1 = true;
             string[] loc0 = IsFile0 ? IF.MountVHD(out status0, VHD0) : new[] {VHD0};

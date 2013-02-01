@@ -87,6 +87,9 @@ namespace VMProvisioningAgent
 
         public string Flatten()
         {
+            if (Data == null)
+                return String.Empty;
+
             string output = String.Empty;
 
             foreach (var path in Data)
