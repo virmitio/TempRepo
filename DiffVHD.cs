@@ -49,15 +49,43 @@ namespace VMProvisioningAgent
             VirtualDisk Old, New, Out;
             Old = VirtualDisk.OpenDisk(OldVHD, FileAccess.Read);
             New = VirtualDisk.OpenDisk(NewVHD, FileAccess.Read);
-            Out = VirtualDisk.CreateDisk(OutputType.ToString(), VHDVarient, Output, New.Capacity, New.Geometry, null);
-            using (Old) using (New) using (Out)
-            {
-                if (Out is DiscUtils.Vhd.Disk) ((DiscUtils.Vhd.Disk) Out).AutoCommitFooter = false;
-                
 
+            using (var fs = new FileStream(OldVHD, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+            {
+                switch (OutputType)
+                {
+                    case DiskType.VHD:
+                        Out = DiscUtils.Vhd.Disk.InitializeDynamic(fs, Ownership.None, New.Capacity, New.BlockSize);
+                        break;
+                    case DiskType.VHDX:
+                        Out = DiscUtils.Vhdx.Disk.InitializeDynamic(fs, Ownership.None, New.Capacity, New.BlockSize);
+                        break;
+                    default:
+                        throw new NotSupportedException("The selected disk type is not supported at this time.",
+                                                        new ArgumentException(
+                                                            "Selected DiskType not currently supported.", "OutputType"));
+                }
+
+
+
+                using (Old)
+                using (New)
+                using (Out)
+                {
+                    // set up the output location
+                    if (Out is DiscUtils.Vhd.Disk) ((DiscUtils.Vhd.Disk) Out).AutoCommitFooter = false;
+                    DiscUtils.Partitions.BiosPartitionTable.Initialize(Out, DiscUtils.Partitions.WellKnownPartitionType.WindowsNtfs);
+
+                    if (Out.IsPartitioned)
+                    {
+                        var OutFS = new DiscUtils.Ntfs.NtfsFileSystem(Out.Partitions[0].Open());
+
+                    }
+
+
+                }
 
             }
-
         }
     }
 }
