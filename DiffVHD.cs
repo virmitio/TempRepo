@@ -55,7 +55,7 @@ namespace VMProvisioningAgent
         /// <returns></returns>
         public static void CreateDiff(string OldVHD, string NewVHD, string Output, DiskType OutputType = DiskType.VHD, bool Force = false, int? Partition = null)
         {
-            return CreateDiff(OldVHD, NewVHD, Output, OutputType, Force, Partition.HasValue ? new Tuple<int, int>(Partition.Value, Partition.Value) : null);
+            CreateDiff(OldVHD, NewVHD, Output, OutputType, Force, Partition.HasValue ? new Tuple<int, int>(Partition.Value, Partition.Value) : null);
         }
         
         /// <summary>
@@ -138,16 +138,26 @@ namespace VMProvisioningAgent
 
                     // set up the output location
                     if (Out is DiscUtils.Vhd.Disk) ((DiscUtils.Vhd.Disk) Out).AutoCommitFooter = false;
-                    var OutParts = DiscUtils.Partitions.BiosPartitionTable.Initialize(Out);
+                    var OutParts = BiosPartitionTable.Initialize(Out);
                     
                     if (Partition != null)
                     {
                         OutParts.Create(GetPartitionType(Old.Partitions[Partition.Item1]), false); // there is no need (ever) for a VHD diff to have bootable partitions
-
+                        DiffPart(DetectFileSystem(Old.Partitions[Partition.Item1]),
+                                 DetectFileSystem(New.Partitions[Partition.Item2]), 
+                                 DetectFileSystem(OutParts[0]));  // As we made the partition spen the entire drive, it should be the only partition
                     }
                     else // Partition == null
                     {
-                        
+                        for (int i = 0; i < Old.Partitions.Count; i++)
+                        {
+                            var partIndex = OutParts.Create(GetPartitionType(Old.Partitions[i]), false);
+                            DiffPart(DetectFileSystem(Old.Partitions[i]),
+                                     DetectFileSystem(New.Partitions[i]),
+                                     DetectFileSystem(OutParts[partIndex]));
+                        }
+
+
                     }
 
 
@@ -179,7 +189,7 @@ namespace VMProvisioningAgent
             }
         }
 
-        private DiscFileSystem DetectFileSystem(PartitionInfo Partition)
+        private static DiscFileSystem DetectFileSystem(PartitionInfo Partition)
         {
             using (var stream = Partition.Open())
             {
@@ -188,14 +198,87 @@ namespace VMProvisioningAgent
                 stream.Seek(0, SeekOrigin.Begin);
                 if (FatFileSystem.Detect(stream))
                     return new FatFileSystem(Partition.Open());
-                stream.Seek(0, SeekOrigin.Begin);
 
+                /* Ext2/3/4 file system - when Ext becomes fully writable
+                  
+                stream.Seek(0, SeekOrigin.Begin);
+                if (ExtFileSystem.Detect(stream))
+                    return new ExtFileSystem(Partition.Open());
+                */
+                return null;
             }
         }
 
-        private void DiffPart()
+        private static void DiffPart(DiscFileSystem PartA, DiscFileSystem PartB, DiscFileSystem Output)
         {
+            if (PartA == null) throw new ArgumentNullException("PartA");
+            if (PartB == null) throw new ArgumentNullException("PartB");
+            if (Output == null) throw new ArgumentNullException("Output");
+
             
+
+        }
+
+        public enum ComparisonStyle
+        {
+            /// <summary> For each pair of files with same name, perform DateTime compare.  If identical, continue with size and Binary compare. </summary>
+            Full,
+            /// <summary> Only compare filenames and sizes.  If a file exists on both sides with same size, assume identical. </summary>
+            NameOnly,
+            /// <summary> For each pair of files with same name, compare only DateTime and size. Does not compare content. </summary>
+            DateTimeOnly,
+            /// <summary> For each pair of files with same name, compares size and binary content regardless of DateTime. </summary>
+            BinaryOnly,
+        }
+        
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="A"></param>
+        /// <param name="B"></param>
+        /// <param name="Style"></param>
+        /// <returns>True if A and B are equivalent.</returns>
+        private static bool CompareFile(DiscFileInfo A, DiscFileInfo B, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
+        {
+            if (A == null || B == null) return A == B;
+            return A.Length == B.Length &&
+                   (Style == ComparisonStyle.NameOnly || (Style == ComparisonStyle.BinaryOnly
+                                                              ? FilesMatch(A, B)
+                                                              : (A.LastWriteTimeUtc == B.LastWriteTimeUtc &&
+                                                                 (Style == ComparisonStyle.DateTimeOnly || FilesMatch(A, B)))));
+        }
+
+        private static bool FilesMatch(DiscFileInfo A, DiscFileInfo B)
+        {
+            const int BufferSize = 2048;  // arbitrarily chosen buffer size
+            byte[] buffA = new byte[BufferSize];
+            byte[] buffB = new byte[BufferSize];
+
+            var fileA = A.OpenRead();
+            var fileB = B.OpenRead();
+
+            int numA, numB;
+            while (fileA.Position < fileA.Length)
+            {
+                numA = fileA.Read(buffA, 0, BufferSize);
+                numB = fileB.Read(buffB, 0, BufferSize);
+                if (numA != numB)
+                {
+                    fileA.Close();
+                    fileB.Close();
+                    return false;
+                }
+                for (int i = 0; i < numA; i++)
+                    if (buffA[i] != buffB[i])
+                    {
+                        fileA.Close();
+                        fileB.Close();
+                        return false;
+                    }
+            }
+            fileA.Close();
+            fileB.Close();
+            return true;
         }
 
     }
