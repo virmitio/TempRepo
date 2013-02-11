@@ -68,7 +68,7 @@ namespace VMProvisioningAgent
         /// <param name="Force">If true, will overwrite the Output file if it already exists.  Defaults to 'false'.</param>
         /// <param name="Partition">An int tuple which declares a specific pair of partitions to compare.  The first value in the tuple will be the 0-indexed partition number from OldVHD to compare against.  The second value of the tuple will be the 0-indexed parition from NewVHD to compare with.</param>
         /// <returns></returns>
-        public static void CreateDiff(string OldVHD, string NewVHD, string Output, DiskType OutputType = DiskType.VHD, bool Force = false, Tuple<int, int> Partition = null)
+        public static void CreateDiff(string OldVHD, string NewVHD, string Output, DiskType OutputType = DiskType.VHD, bool Force = false, Tuple<int, int> Partition = null, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
             if (File.Exists(Output) && !Force) throw new ArgumentException("Output file already exists.", "Output");
             if (!File.Exists(OldVHD)) throw new ArgumentException("Input file does not exist.", "OldVHD");
@@ -120,10 +120,10 @@ namespace VMProvisioningAgent
                 switch (OutputType)
                 {
                     case DiskType.VHD:
-                        Out = DiscUtils.Vhd.Disk.InitializeDynamic(fs, Ownership.None, OutputCapacity, Math.Max(New.BlockSize, 4096)); // the Max() is present only because there's currently a bug with blocksize < (8*sectorSize) in DiscUtils
+                        Out = DiscUtils.Vhd.Disk.InitializeDynamic(fs, Ownership.None, OutputCapacity, Math.Max(New.BlockSize, 512 * 1024)); // the Max() is present only because there's currently a bug with blocksize < (8*sectorSize) in DiscUtils
                         break;
                     case DiskType.VHDX:
-                        Out = DiscUtils.Vhdx.Disk.InitializeDynamic(fs, Ownership.None, OutputCapacity, Math.Max(New.BlockSize, 4096));
+                        Out = DiscUtils.Vhdx.Disk.InitializeDynamic(fs, Ownership.None, OutputCapacity, Math.Max(New.BlockSize, 512 * 1024));
                         break;
                     default:
                         throw new NotSupportedException("The selected disk type is not supported at this time.",
@@ -144,8 +144,9 @@ namespace VMProvisioningAgent
                     {
                         OutParts.Create(GetPartitionType(Old.Partitions[Partition.Item1]), false); // there is no need (ever) for a VHD diff to have bootable partitions
                         DiffPart(DetectFileSystem(Old.Partitions[Partition.Item1]),
-                                 DetectFileSystem(New.Partitions[Partition.Item2]), 
-                                 DetectFileSystem(OutParts[0]));  // As we made the partition spen the entire drive, it should be the only partition
+                                 DetectFileSystem(New.Partitions[Partition.Item2]),
+                                 DetectFileSystem(OutParts[0]),  // As we made the partition spen the entire drive, it should be the only partition
+                                 Style);
                     }
                     else // Partition == null
                     {
@@ -154,14 +155,15 @@ namespace VMProvisioningAgent
                             var partIndex = OutParts.Create(GetPartitionType(Old.Partitions[i]), false);
                             DiffPart(DetectFileSystem(Old.Partitions[i]),
                                      DetectFileSystem(New.Partitions[i]),
-                                     DetectFileSystem(OutParts[partIndex]));
+                                     DetectFileSystem(OutParts[partIndex]),
+                                     Style);
                         }
 
-
+                        //////////////////
                     }
 
 
-
+                    ////////////////
                 }
 
             }
@@ -200,22 +202,43 @@ namespace VMProvisioningAgent
                     return new FatFileSystem(Partition.Open());
 
                 /* Ext2/3/4 file system - when Ext becomes fully writable
-                  
+                
                 stream.Seek(0, SeekOrigin.Begin);
                 if (ExtFileSystem.Detect(stream))
                     return new ExtFileSystem(Partition.Open());
                 */
+
                 return null;
             }
         }
 
-        private static void DiffPart(DiscFileSystem PartA, DiscFileSystem PartB, DiscFileSystem Output)
+        private static void DiffPart(DiscFileSystem PartA, DiscFileSystem PartB, DiscFileSystem Output, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
             if (PartA == null) throw new ArgumentNullException("PartA");
             if (PartB == null) throw new ArgumentNullException("PartB");
             if (Output == null) throw new ArgumentNullException("Output");
 
-            
+            if (PartA is NtfsFileSystem)
+            {
+                ((NtfsFileSystem)PartA).NtfsOptions.HideHiddenFiles = false;
+                ((NtfsFileSystem)PartA).NtfsOptions.HideSystemFiles = false;
+            }
+            if (PartB is NtfsFileSystem)
+            {
+                ((NtfsFileSystem)PartB).NtfsOptions.HideHiddenFiles = false;
+                ((NtfsFileSystem)PartB).NtfsOptions.HideSystemFiles = false;
+            }
+            if (Output is NtfsFileSystem)
+            {
+                ((NtfsFileSystem)Output).NtfsOptions.HideHiddenFiles = false;
+                ((NtfsFileSystem)Output).NtfsOptions.HideSystemFiles = false;
+            }
+
+            var RootA = PartA.Root;
+            var RootB = PartB.Root;
+            var OutRoot = Output.Root;
+
+            CompareTree(RootA, RootB, OutRoot, Style);
 
         }
 
@@ -231,6 +254,12 @@ namespace VMProvisioningAgent
             BinaryOnly,
         }
         
+        private static void CompareTree(DiscDirectoryInfo A, DiscDirectoryInfo B, DiscDirectoryInfo Out,
+                                        ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
+        {
+            
+        }
+
         /// <summary>
         /// 
         /// </summary>
