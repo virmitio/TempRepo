@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using ClrPlus.Core.Exceptions;
 using DiscUtils;
 using DiscUtils.Ext;
 using DiscUtils.Fat;
@@ -257,7 +258,29 @@ namespace VMProvisioningAgent
         private static void CompareTree(DiscDirectoryInfo A, DiscDirectoryInfo B, DiscDirectoryInfo Out,
                                         ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
-            
+            var Afiles = A.GetFiles();
+            foreach (var file in B.GetFiles().Where(file => !Afiles.Contains(file, new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
+                                                                                       (a, b) => a.Name.Equals(b.Name),
+                                                                                       d => d.Name.GetHashCode())) ||
+                                                            CompareFile(A.GetFiles(file.Name).Single(), file, Style)))
+            {
+                CopyFile(file, Out.FileSystem.GetFileInfo(Path.Combine(Out.FullName, file.Name)), true);
+            }
+
+            var Asubs = A.GetDirectories();
+            foreach (var subdir in B.GetDirectories())
+            {
+                if (Asubs.Contains(subdir, new ClrPlus.Core.Extensions.EqualityComparer<DiscDirectoryInfo>(
+                                           (a, b) => a.Name.Equals(b.Name),
+                                           d => d.Name.GetHashCode())))
+                {
+                    CompareTree(A.GetDirectories(subdir.Name).Single(), subdir, Out, Style);
+                }
+                else
+                {
+                    CopyTree(subdir, Out.FileSystem.GetDirectoryInfo(Path.Combine(Out.FullName, subdir.Name)), true);
+                }
+            }
         }
 
         /// <summary>
@@ -310,5 +333,40 @@ namespace VMProvisioningAgent
             return true;
         }
 
+        private static bool CopyTree(DiscDirectoryInfo Source, DiscDirectoryInfo Destination, bool Force)
+        {
+            if (!Force && Destination.Exists && Destination.GetFileSystemInfos().Any()) return false;
+            if (!Source.Exists) throw new ArgumentException("Source directory does not exist.", "Source");
+
+            bool retVal = true;
+            if (!Destination.Exists) Destination.Create();
+            foreach (var file in Source.GetFiles())
+            {
+                var DestFile = Destination.FileSystem.GetFileInfo(Path.Combine(Destination.FullName, file.Name));
+                retVal &= CopyFile(file, DestFile, Force);
+            }
+
+            return retVal && Source.GetDirectories().Aggregate(true, (current, sub) => current & CopyTree(sub, Destination.FileSystem.GetDirectoryInfo(Path.Combine(Destination.FullName, sub.Name)), Force));
+        }
+
+        private static bool CopyFile(DiscFileInfo Source, DiscFileInfo Destination, bool Force)
+        {
+            Stream sStream, dStream;
+            if (Destination.Exists)
+                if (Force) dStream = Destination.Open(FileMode.Truncate, FileAccess.ReadWrite);
+                else return false;
+            else dStream = Destination.Create();
+            using (sStream = Source.OpenRead())
+            using (dStream)
+                try
+                {
+                    sStream.CopyTo(dStream);
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+            return true;
+        }
     }
 }
