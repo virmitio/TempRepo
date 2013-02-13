@@ -30,16 +30,16 @@ namespace VMProvisioningAgent
         protected static readonly string[] ExcludeFiles = new string[] { @"\PAGEFILE.SYS", @"\HIBERFIL.SYS", @"\SYSTEM VOLUME INFORMATION", @"\WINDOWS\SYSTEM32\CONFIG" };
         protected static readonly string[] SystemRegistryFiles = new string[]
             {
-                @"\WINDOWS\SYSTEM32\CONFIG\BCD-TEMPLATE",
-                @"\WINDOWS\SYSTEM32\CONFIG\COMPONENTS",
-                @"\WINDOWS\SYSTEM32\CONFIG\DEFAULT",
-                @"\WINDOWS\SYSTEM32\CONFIG\DRIVERS",
-                @"\WINDOWS\SYSTEM32\CONFIG\FP",
-                @"\WINDOWS\SYSTEM32\CONFIG\SAM",
-                @"\WINDOWS\SYSTEM32\CONFIG\SECURITY",
-                @"\WINDOWS\SYSTEM32\CONFIG\SOFTWARE",
-                @"\WINDOWS\SYSTEM32\CONFIG\SYSTEM",
-                @"\WINDOWS\SYSTEM32\CONFIG\SYSTEMPROFILE\NTUSER.DAT",
+                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\BCD-TEMPLATE",RootFiles),
+                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\COMPONENTS",RootFiles),
+                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\DEFAULT",RootFiles),
+                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\DRIVERS",RootFiles),
+                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\FP",RootFiles),
+                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SAM",RootFiles),
+                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SECURITY",RootFiles),
+                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SOFTWARE",RootFiles),
+                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SYSTEM",RootFiles),
+                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SYSTEMPROFILE\NTUSER.DAT",RootFiles),
             };
 
         protected static readonly Regex UserRegisrtyFiles = new Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
@@ -75,14 +75,14 @@ namespace VMProvisioningAgent
             if (!File.Exists(OldVHD)) throw new ArgumentException("Input file does not exist.", "OldVHD");
             if (!File.Exists(NewVHD)) throw new ArgumentException("Input file does not exist.", "NewVHD");
 
-            byte[] CopyBuffer = new byte[1024*1024];
+            // byte[] CopyBuffer = new byte[1024*1024];
             VirtualDisk Old, New, Out;
             Old = VirtualDisk.OpenDisk(OldVHD, FileAccess.Read);
             New = VirtualDisk.OpenDisk(NewVHD, FileAccess.Read);
 
             using (Old)
             using (New)
-            using (var fs = new FileStream(OldVHD, Force ? FileMode.Create : FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+            using (var OutFS = new FileStream(OldVHD, Force ? FileMode.Create : FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
             {
 
                 // Check type of filesystems being compared
@@ -115,24 +115,20 @@ namespace VMProvisioningAgent
                             OutputCapacities[i] = Math.Max(Old.Partitions[i].SectorCount * Old.Geometry.BytesPerSector, New.Partitions[i].SectorCount * New.Geometry.BytesPerSector);
                 }
 
-
                 long OutputCapacity = CapacityBuffer + OutputCapacities.Sum();
-
                 switch (OutputType)
                 {
                     case DiskType.VHD:
-                        Out = DiscUtils.Vhd.Disk.InitializeDynamic(fs, Ownership.None, OutputCapacity, Math.Max(New.BlockSize, 512 * 1024)); // the Max() is present only because there's currently a bug with blocksize < (8*sectorSize) in DiscUtils
+                        Out = DiscUtils.Vhd.Disk.InitializeDynamic(OutFS, Ownership.None, OutputCapacity, Math.Max(New.BlockSize, 512 * 1024)); // the Max() is present only because there's currently a bug with blocksize < (8*sectorSize) in DiscUtils
                         break;
                     case DiskType.VHDX:
-                        Out = DiscUtils.Vhdx.Disk.InitializeDynamic(fs, Ownership.None, OutputCapacity, Math.Max(New.BlockSize, 512 * 1024));
+                        Out = DiscUtils.Vhdx.Disk.InitializeDynamic(OutFS, Ownership.None, OutputCapacity, Math.Max(New.BlockSize, 512 * 1024));
                         break;
                     default:
                         throw new NotSupportedException("The selected disk type is not supported at this time.",
                                                         new ArgumentException(
                                                             "Selected DiskType not currently supported.", "OutputType"));
                 }
-
-
 
                 using (Out)
                 {
@@ -153,21 +149,19 @@ namespace VMProvisioningAgent
                     {
                         for (int i = 0; i < Old.Partitions.Count; i++)
                         {
-                            var partIndex = OutParts.Create(GetPartitionType(Old.Partitions[i]), false);
+                            var partIndex = OutParts.Create(Math.Max(Old.Partitions[i].SectorCount * Old.Parameters.BiosGeometry.BytesPerSector, 
+                                                                     New.Partitions[i].SectorCount * New.Parameters.BiosGeometry.BytesPerSector), 
+                                                            GetPartitionType(Old.Partitions[i]), false);
                             DiffPart(DetectFileSystem(Old.Partitions[i]),
                                      DetectFileSystem(New.Partitions[i]),
                                      DetectFileSystem(OutParts[partIndex]),
                                      Style);
                         }
-
-                        //////////////////
                     }
 
+                } // using (Out)
 
-                    ////////////////
-                }
-
-            }
+            } // using (Old, New, and OutFS)
         }
 
         private static WellKnownPartitionType GetPartitionType(PartitionInfo Partition)
@@ -238,8 +232,46 @@ namespace VMProvisioningAgent
             var RootA = PartA.Root;
             var RootB = PartB.Root;
             var OutRoot = Output.Root;
+            var OutFileRoot = Output.GetDirectoryInfo(RootFiles);
+            if (!OutFileRoot.Exists) OutFileRoot.Create();
 
-            CompareTree(RootA, RootB, OutRoot, Style);
+            CompareTree(RootA, RootB, OutFileRoot, Style);
+
+            foreach (var file in OutFileRoot.GetFiles("*", SearchOption.AllDirectories).Where(dfi => SystemRegistryFiles.Contains(dfi.FullName)))
+            {
+                var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
+                if (!A.Exists)
+                {
+                    file.FileSystem.MoveFile(file.FullName, String.Concat(RootSystemRegistry, A.FullName));
+                    continue;
+                }
+                //else
+                var comp = new RegistryComparison(A.OpenRead(), file.OpenRead());
+                comp.DoCompare();
+                var diff = new RegDiff(comp, RegistryComparison.Side.B);
+                var outFile = Output.GetFileInfo(String.Concat(RootSystemRegistry, A.FullName));
+                diff.WriteToStream(outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite));
+                file.Delete(); // remove this file from the set of file to copy and overwrite
+            }
+
+            foreach (var file in OutFileRoot.GetFiles("*", SearchOption.AllDirectories).Where(dfi => UserRegisrtyFiles.IsMatch(dfi.FullName)))
+            {
+                // Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
+                var match = UserRegisrtyFiles.Match(file.FullName);
+                var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
+                if (!A.Exists)
+                {
+                    file.FileSystem.MoveFile(file.FullName, Path.Combine(RootUserRegistry, match.Groups["user"].Value, A.Name));
+                    continue;
+                }
+                //else
+                var comp = new RegistryComparison(A.OpenRead(), file.OpenRead());
+                comp.DoCompare();
+                var diff = new RegDiff(comp, RegistryComparison.Side.B);
+                var outFile = Output.GetFileInfo(Path.Combine(RootUserRegistry, match.Groups["user"].Value, A.FullName));
+                diff.WriteToStream(outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite));
+                file.Delete(); // remove this file from the set of file to copy and overwrite
+            }
 
         }
 
@@ -259,20 +291,21 @@ namespace VMProvisioningAgent
                                         ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
             var Afiles = A.GetFiles();
-            foreach (var file in B.GetFiles().Where(file => !Afiles.Contains(file, new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
+            foreach (var file in B.GetFiles().Where(file => !ExcludeFiles.Contains(file.FullName) && (!Afiles.Contains(file, 
+                                                            new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
                                                                                        (a, b) => a.Name.Equals(b.Name),
                                                                                        d => d.Name.GetHashCode())) ||
-                                                            CompareFile(A.GetFiles(file.Name).Single(), file, Style)))
+                                                            CompareFile(A.GetFiles(file.Name).Single(), file, Style))))
             {
                 CopyFile(file, Out.FileSystem.GetFileInfo(Path.Combine(Out.FullName, file.Name)), true);
             }
 
             var Asubs = A.GetDirectories();
-            foreach (var subdir in B.GetDirectories())
+            foreach (var subdir in B.GetDirectories().Where(subdir => !ExcludeFiles.Contains(subdir.FullName)))
             {
                 if (Asubs.Contains(subdir, new ClrPlus.Core.Extensions.EqualityComparer<DiscDirectoryInfo>(
-                                           (a, b) => a.Name.Equals(b.Name),
-                                           d => d.Name.GetHashCode())))
+                                               (a, b) => a.Name.Equals(b.Name),
+                                               d => d.Name.GetHashCode())))
                 {
                     CompareTree(A.GetDirectories(subdir.Name).Single(), subdir, Out, Style);
                 }
@@ -367,6 +400,59 @@ namespace VMProvisioningAgent
                     return false;
                 }
             return true;
+        }
+
+        public static void ApplyDiff(string BaseVHD, string DiffVHD, string OutVHD = null, bool DifferencingOut = false, Tuple<int, int> Partition = null)
+        {
+            var DiffDisk = VirtualDisk.OpenDisk(DiffVHD, FileAccess.Read);
+            VirtualDisk OutDisk;
+
+            if (DifferencingOut)
+            {
+                using (var BaseDisk = VirtualDisk.OpenDisk(BaseVHD, FileAccess.Read))
+                {
+                    if (OutVHD == null || OutVHD.Equals(String.Empty))
+                        throw new ArgumentNullException("OutVHD",
+                                                        "OutVHD may not be null or empty when DifferencingOut is 'true'.");
+
+                    OutDisk = BaseDisk.CreateDifferencingDisk(OutVHD);
+                }
+            }
+            else
+            {
+                if (OutVHD != null)
+                    File.Copy(BaseVHD, OutVHD);
+                else
+                    OutVHD = BaseVHD;
+
+                OutDisk = VirtualDisk.OpenDisk(OutVHD, FileAccess.ReadWrite);
+            }
+
+            if (Partition != null)
+            {
+                var Base = OutDisk.Partitions[Partition.Item1];
+                var Diff = DiffDisk.Partitions[Partition.Item2];
+                ApplyPartDiff(Base, Diff);
+            }
+            else
+            {
+                if (OutDisk.Partitions.Count != DiffDisk.Partitions.Count)
+                    throw new ArgumentException("Input disks do not have the same number of partitions.  To apply the diff for specific partitions on mismatched disks, provide the 'Partition' parameter.");
+                for (int i = 0; i < OutDisk.Partitions.Count; i++)
+                {
+                    if (OutDisk.Partitions[i].BiosType != DiffDisk.Partitions[i].BiosType)
+                        throw new InvalidFileSystemException(
+                            String.Format(
+                                "Filesystem of partition {0} in '{1}' does not match filesystem type of partition {2} in '{3}'.  Unable to apply diff.",
+                                Partition.Item2, DiffVHD, Partition.Item1, OutVHD));
+                    ApplyPartDiff(OutDisk.Partitions[i], DiffDisk.Partitions[i]);
+                }
+            }
+        }
+
+        private static void ApplyPartDiff(PartitionInfo Base, PartitionInfo Diff)
+        {
+            ///////////////////////////////////////////////////////////////////////////////////////////////////////////
         }
     }
 }

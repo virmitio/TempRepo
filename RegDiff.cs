@@ -6,17 +6,17 @@ using System.Spatial;
 using System.Text;
 using System.Text.RegularExpressions;
 using ClrPlus.Core.Collections;
-using Microsoft.Win32;
+using DiscUtils.Registry;
 
 namespace VMProvisioningAgent
 {
-    class RegDiff
+    public class RegDiff
     {
         public class ValueObject
         {
-            public RegistryValueKind Type { get; private set; }
+            public RegistryValueType Type { get; private set; }
             public object Value { get; private set; }
-            public ValueObject(RegistryValueKind Kind, object Object)
+            public ValueObject(RegistryValueType Kind, object Object)
             {
                 Type = Kind;
                 Value = Object;
@@ -47,7 +47,7 @@ namespace VMProvisioningAgent
 
         }
 
-        public static RegDiff ReadFromStream(StreamReader Input)
+        /*        public static RegDiff ReadFromStream(StreamReader Input)
         {
             RegDiff output = new RegDiff();
 
@@ -73,7 +73,7 @@ namespace VMProvisioningAgent
                     test = ValueStr.Match(line);
                     if (test.Success)
                     {
-                        RegistryValueKind kind = (RegistryValueKind)Enum.Parse(typeof(RegistryValueKind), test.Groups["type"].Value, true);
+                        RegistryValueType kind = (RegistryValueType)Enum.Parse(typeof(RegistryValueType), test.Groups["type"].Value, true);
                         output.Data[CurrentPath][test.Groups["name"].Value] = new ValueObject(kind, test.Groups["value"].Value);
                     }
                     else
@@ -84,8 +84,42 @@ namespace VMProvisioningAgent
             }
             return output;
         }
+        */
 
-        public string Flatten()
+        public static RegDiff ReadFromStream(Stream Input)
+        {
+            try { return ReadFromHive(new RegistryHive(Input, DiscUtils.Ownership.None)); }
+            catch (Exception e) { return new RegDiff(); }
+        }
+
+        public static RegDiff ReadFromHive(RegistryHive Input)
+        {
+            var Out = new RegDiff();
+            var Root = Input.Root;
+            foreach (var name in Root.GetValueNames())
+            {
+                Out.Data[String.Empty][name] = new ValueObject(Root.GetValueType(name), Root.GetValue(name));
+            }
+            foreach (var sub in Root.GetSubKeyNames())
+            {
+                InnerRead(Root.OpenSubKey(sub), Out.Data);
+            }
+            return Out;
+        }
+
+        private static void InnerRead(RegistryKey key, XDictionary<string, XDictionary<string, ValueObject>> data)
+        {
+            foreach (var name in key.GetValueNames())
+            {
+                data[key.Name][name] = new ValueObject(key.GetValueType(name), key.GetValue(name));
+            }
+            foreach (var sub in key.GetSubKeyNames())
+            {
+                InnerRead(key.OpenSubKey(sub), data);
+            }
+        }
+
+        /*        public string Flatten()
         {
             if (Data == null)
                 return String.Empty;
@@ -102,16 +136,16 @@ namespace VMProvisioningAgent
                     var realVal = item.Value.Value;
                     switch (item.Value.Type)
                     {
-                        case RegistryValueKind.Binary:
-                        case RegistryValueKind.DWord:
-                        case RegistryValueKind.ExpandString:
-                        case RegistryValueKind.MultiString:
-                        case RegistryValueKind.QWord:
-                        case RegistryValueKind.String:
+                        case RegistryValueType.Binary:
+                        case RegistryValueType.Dword:
+                        case RegistryValueType.ExpandString:
+                        case RegistryValueType.MultiString:
+                        case RegistryValueType.QWord:
+                        case RegistryValueType.String:
                             tmp += value.Replace("\n", "\\\n");
                             break;
-                        case RegistryValueKind.Unknown:
-                        case RegistryValueKind.None:
+                        //case RegistryValueType.Unknown:
+                        case RegistryValueType.None:
                         default:
                             throw new ParseErrorException(String.Format("Unable to output value of '{0}::{1}'. Unable to identify value type.", path.Key, item.Key));
                     }
@@ -121,10 +155,24 @@ namespace VMProvisioningAgent
             }
             return output;
         }
+        */
 
-        public void WriteToStream(StreamWriter Output)
+        public void WriteToStream(Stream Output)
         {
-            Output.Write(Flatten());
+            //Output.Write(Flatten());
+            RegistryHive Out;
+
+            try { Out = new RegistryHive(Output, DiscUtils.Ownership.None); }
+            catch (Exception e) { Out = RegistryHive.Create(Output, DiscUtils.Ownership.None); }
+
+            var root = Out.Root;
+
+            foreach (var path in Data)
+            {
+                var currentKey = root.CreateSubKey(path.Key);
+                foreach (var val in path.Value)
+                    currentKey.SetValue(val.Key, val.Value.Value, val.Value.Type);
+            }
         }
 
         public bool Apply(RegistryKey Root, Action<string> Log = null)

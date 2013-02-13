@@ -3,66 +3,47 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using Microsoft.Win32;
+using DiscUtils.Registry;
 
 namespace VMProvisioningAgent
 {
     class RegistryComparison
     {
-        private class Hive
-        {
-            public readonly string file;
-            public RegistryKey root { get; private set; }
-
-            public Hive(string FileName)
-            {
-                file = FileName;
-            }
-            
-            public bool Init()
-            {
-                if (file == null || file.Equals(String.Empty))
-                    return false;
-                if (!File.Exists(file))
-                    return false;
-                string tmp = RegExtra.LoadHive(RegistryHive.LocalMachine, file);
-                if (tmp == null)
-                    return false;
-                root = Registry.LocalMachine.OpenSubKey(tmp);
-                return root != null;
-            }
-        }
-
         public enum Side { A, B }
 
-        private readonly Hive hiveA, hiveB;
-        public string HiveA { get { return hiveA.file; } }
-        public string HiveB { get { return hiveB.file; } }
+        public RegistryHive HiveA { get; private set; }
+        public RegistryHive HiveB { get; private set; }
 
         public RegistryComparison(string HiveFileA, string HiveFileB)
         {
-            hiveA = new Hive(HiveFileA);
-            hiveB = new Hive(HiveFileB);
+            HiveA = new RegistryHive(File.OpenRead(HiveFileA));
+            HiveB = new RegistryHive(File.OpenRead(HiveFileB));
         }
-        
+
+        public RegistryComparison(Stream HiveFileA, Stream HiveFileB)
+        {
+            HiveA = new RegistryHive(HiveFileA);
+            HiveB = new RegistryHive(HiveFileB);
+        }
+
         public class Data
         {
-            public RegistryValueKind TypeA { get; private set; }
+            public RegistryValueType TypeA { get; private set; }
             public object ValueA { get; private set; }
-            public RegistryValueKind TypeB { get; private set; }
+            public RegistryValueType TypeB { get; private set; }
             public object ValueB { get; private set; }
             public bool Same { get; private set; }
 
             public Data()
             {
-                TypeA = RegistryValueKind.None;
-                TypeB = RegistryValueKind.None;
+                TypeA = RegistryValueType.None;
+                TypeB = RegistryValueType.None;
                 ValueA = null;
                 ValueB = null;
                 Same = false;
             }
 
-            public Data(object aVal, RegistryValueKind aType, object bVal, RegistryValueKind bType)
+            public Data(object aVal, RegistryValueType aType, object bVal, RegistryValueType bType)
             {
                 TypeA = aType;
                 TypeB = bType;
@@ -71,14 +52,14 @@ namespace VMProvisioningAgent
                 CheckSame();
             }
 
-            public void SetA(object aVal, RegistryValueKind aType)
+            public void SetA(object aVal, RegistryValueType aType)
             {
                 TypeA = aType;
                 ValueA = aVal;
                 CheckSame();
             }
 
-            public void SetB(object bVal, RegistryValueKind bType)
+            public void SetB(object bVal, RegistryValueType bType)
             {
                 TypeA = bType;
                 ValueA = bVal;
@@ -96,7 +77,7 @@ namespace VMProvisioningAgent
 
         public bool DoCompare()
         {
-            return hiveA.Init() && hiveB.Init() && InnerCompare(hiveA.root, hiveB.root, @"\", ref _output);
+            return InnerCompare(HiveA.Root, HiveB.Root, @"\", ref _output);
         }
 
         private static bool InnerCompare(RegistryKey A, RegistryKey B, string root,ref Dictionary<string, Data> output)
@@ -111,7 +92,7 @@ namespace VMProvisioningAgent
                     {
                         string EntryName = root + A.Name + "::" + Name;
                         var dat = new Data();
-                        dat.SetA(A.GetValue(Name), A.GetValueKind(Name));
+                        dat.SetA(A.GetValue(Name), A.GetValueType(Name));
                         output.Add(EntryName, dat);
                     }
                     foreach (var keyName in A.GetSubKeyNames())
@@ -127,7 +108,7 @@ namespace VMProvisioningAgent
                     {
                         string EntryName = root + B.Name + "::" + Name;
                         Data dat = output.ContainsKey(EntryName) ? output[EntryName] : new Data();
-                        dat.SetB(B.GetValue(Name), B.GetValueKind(Name));
+                        dat.SetB(B.GetValue(Name), B.GetValueType(Name));
                         output[EntryName] = dat;
                     }
                     foreach (var keyName in B.GetSubKeyNames())
