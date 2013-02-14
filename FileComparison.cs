@@ -8,7 +8,9 @@ using ClrPlus.Platform;
 
 namespace VMProvisioningAgent
 {
-    public class FileComparison
+
+    /*
+    internal class FileComparison
     {
         // This needs to be valid as part of a Windows filename, but also vanishingly unlikely to be encountered at the end of an existing filename...
         public const string SymLinkDecorator = @"%%[SYMLINK]%%";  
@@ -259,7 +261,8 @@ namespace VMProvisioningAgent
         }
 
     }
-    public static class FCStatics
+    
+    internal static class FCStatics
     {
         public static IEnumerable<FileInfo> OnlyA(this FileComparison FC)
         {
@@ -311,4 +314,6 @@ namespace VMProvisioningAgent
         }
 
     }
+    */
+
 }

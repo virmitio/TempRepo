@@ -175,7 +175,7 @@ namespace VMProvisioningAgent
             }
         }
 
-        public bool Apply(RegistryKey Root, Action<string> Log = null)
+        public bool ApplyTo(RegistryKey Root, Action<string> Log = null)
         {
             if (Root == null)
                 throw new ArgumentNullException("Root");

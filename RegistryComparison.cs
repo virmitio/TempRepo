@@ -7,7 +7,7 @@ using DiscUtils.Registry;
 
 namespace VMProvisioningAgent
 {
-    class RegistryComparison
+    public class RegistryComparison
     {
         public enum Side { A, B }
 

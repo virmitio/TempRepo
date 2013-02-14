@@ -18,29 +18,32 @@ namespace VMProvisioningAgent
     internal class BaseCmdlets
     {
         public const string DefaultImplementation = "WinImpl";
+
         public static readonly Regex[] RegistryFiles = new Regex[]
             {
-                new Regex(@"^.*\\system32\\config\\.+$", RegexOptions.IgnoreCase), 
-                new Regex(@"^.*\\documents and settings\\[^\\]+\\ntuser.dat$", RegexOptions.IgnoreCase), 
-                new Regex(@"^.*\\users\\[^\\]+\\ntuser.dat$", RegexOptions.IgnoreCase), 
+                new Regex(@"^.*\\system32\\config\\.+$", RegexOptions.IgnoreCase),
+                new Regex(@"^.*\\documents and settings\\[^\\]+\\ntuser.dat$", RegexOptions.IgnoreCase),
+                new Regex(@"^.*\\users\\[^\\]+\\ntuser.dat$", RegexOptions.IgnoreCase),
             };
 
-        public static readonly Regex SystemRegistry = new Regex(@"^.*\\system32\\config\\SYSTEM$", RegexOptions.IgnoreCase);
-        public static readonly Regex SoftwareRegistry = new Regex(@"^.*\\system32\\config\\SOFTWARE$", RegexOptions.IgnoreCase);
-        public static readonly Regex UserRegistry = new Regex(@"^.*\\users\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
+        public static readonly Regex SystemRegistry = new Regex(@"^.*\\system32\\config\\SYSTEM$",
+                                                                RegexOptions.IgnoreCase);
+
+        public static readonly Regex SoftwareRegistry = new Regex(@"^.*\\system32\\config\\SOFTWARE$",
+                                                                  RegexOptions.IgnoreCase);
+
+        public static readonly Regex UserRegistry = new Regex(@"^.*\\users\\(?<user>[^\\]+)\\ntuser.dat$",
+                                                              RegexOptions.IgnoreCase);
     }
 
     [Cmdlet("Provision", "VM")]
     public class ProvisionVM : RestableCmdlet<ProvisionVM>
     {
-        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
-        [Alias("VM")]
-        [ValidateNotNullOrEmpty]
-        public string Name;
-        
-        [Parameter][ValidateRange(1, int.MaxValue)] public int Memory = 1024; //1GB default == 1024 MB
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)] [Alias("VM")] [ValidateNotNullOrEmpty] public string Name;
+
+        [Parameter] [ValidateRange(1, int.MaxValue)] public int Memory = 1024; //1GB default == 1024 MB
         [Parameter] public SwitchParameter DynamicMemory = false;
-        [Parameter][ValidateRange(0, int.MaxValue)]public int DynamicMemoryLimit = 0;
+        [Parameter] [ValidateRange(0, int.MaxValue)] public int DynamicMemoryLimit = 0;
         [Parameter] [ValidateRange(1, 64)] public int Processors = 1;
         [Parameter] [ValidateRange(1, 1000)] public int CPULimit = 1000; // 100% in tenths of a percent
         [Parameter] public string[] NIC = {};
@@ -69,8 +72,8 @@ namespace VMProvisioningAgent
             // Presently, I assume that values over 1TB (1024 * 1024 MB) were really intended to be sizes in bytes.
             if (Memory > (1024*1024))
                 Memory /= (1024*1024);
-            if (DynamicMemoryLimit > (1024 * 1024))
-                DynamicMemoryLimit /= (1024 * 1024);
+            if (DynamicMemoryLimit > (1024*1024))
+                DynamicMemoryLimit /= (1024*1024);
 
             // I'm using the OS version right now because I don't have a better way to determine Hyper-V capabilities.
             var SysVer = System.Environment.OSVersion;
@@ -82,12 +85,12 @@ namespace VMProvisioningAgent
             }
             switch (SysVer.Version.Minor)
             {
-                case 0:  // Vista / Server 2008
-                case 1:  // Win7 / Server 2008 R2
+                case 0: // Vista / Server 2008
+                case 1: // Win7 / Server 2008 R2
                     MaxMem = MaxDynMem = 64*1024; // 64 GB limit
                     MaxProc = 4;
                     break;
-                case 2:  // Win8 / Server 2012
+                case 2: // Win8 / Server 2012
                     MaxMem = MaxDynMem = 1024*1024; // 1 TB limit
                     MaxProc = 64;
                     break;
@@ -99,7 +102,7 @@ namespace VMProvisioningAgent
             var scope = new ManagementScope(@"\\" + Environment.MachineName + @"\root");
             scope.Connect();
             if (!new ManagementObjectSearcher(scope, new SelectQuery("__Namespace", "Name like 'virtualization'"))
-                                              .Get().Cast<ManagementObject>().Any())
+                     .Get().Cast<ManagementObject>().Any())
             {
                 WriteWarning("Hyper-V not detected on this machine.  Cannot continue.");
                 return;
@@ -108,7 +111,7 @@ namespace VMProvisioningAgent
             // Common items
             // Only 8 Synthetic NICs allowed
             if (NIC.Length > 8) NIC = NIC.Take(8).ToArray();
-            
+
             // Only 4 Legacy NICs allowed
             if (LegacyNIC.Length > 4) LegacyNIC = LegacyNIC.Take(4).ToArray();
 
@@ -118,7 +121,9 @@ namespace VMProvisioningAgent
             // if (DynamicMemoryLimit < 1) DynamicMemoryLimit = Memory;
 
             var VM = Utility.NewVM(Name);
-            if (!VM.ModifyVMConfig(Processors, CPULimit, Memory, DynamicMemoryLimit>0?(int?)DynamicMemoryLimit:null, DynamicMemory))
+            if (
+                !VM.ModifyVMConfig(Processors, CPULimit, Memory,
+                                   DynamicMemoryLimit > 0 ? (int?) DynamicMemoryLimit : null, DynamicMemory))
             {
                 VM.DestroyVM();
                 WriteWarning("Error in VM creation.  See Hyper-V event log for details.");
@@ -128,7 +133,7 @@ namespace VMProvisioningAgent
             string[] SCSI = new string[0];
             string[] IDE0 = new string[0];
             string[] IDE1 = new string[0];
-            
+
             if (VHD.Length > 4)
             {
                 SCSI = VHD.Skip(4).ToArray();
@@ -148,30 +153,48 @@ namespace VMProvisioningAgent
             // Attach IDE drives first
             var settings = VM.GetSettings();
             var devices = VM.GetDevices();
-            ManagementObject[] IDEcontrolers = devices.Where(device => device != null && (device["ResourceSubType"] != null && device["ResourceSubType"].ToString()
-                                                                                                                                                        .Equals(Utility.ResourceSubTypes.ControllerIDE))).ToArray();
+            ManagementObject[] IDEcontrolers =
+                devices.Where(
+                    device =>
+                    device != null && (device["ResourceSubType"] != null && device["ResourceSubType"].ToString()
+                                                                                                     .Equals(
+                                                                                                         Utility
+                                                                                                             .ResourceSubTypes
+                                                                                                             .ControllerIDE)))
+                       .ToArray();
             foreach (string drive in IDE0.Where(drive => !String.IsNullOrEmpty(drive)))
-                if (!VM.AttachVHD(drive, IDEcontrolers[0])) 
-                    try{WriteWarning("Failed to attach drive to IDE controller 0:  " + drive);}
-                    catch {}
+                if (!VM.AttachVHD(drive, IDEcontrolers[0]))
+                    try
+                    {
+                        WriteWarning("Failed to attach drive to IDE controller 0:  " + drive);
+                    }
+                    catch
+                    {
+                    }
             foreach (string drive in IDE1.Where(drive => !String.IsNullOrEmpty(drive)))
-                if (!VM.AttachVHD(drive, IDEcontrolers[1])) 
-                    try{WriteWarning("Failed to attach drive to IDE controller 1:  " + drive);}
-                    catch { }
+                if (!VM.AttachVHD(drive, IDEcontrolers[1]))
+                    try
+                    {
+                        WriteWarning("Failed to attach drive to IDE controller 1:  " + drive);
+                    }
+                    catch
+                    {
+                    }
 
             // Attach SCSI controllers and drives
-            int numCtrl = (SCSI.Length % 64 > 0) ? 1 : 0;
-            numCtrl += SCSI.Length / 64;
-            numCtrl = Math.Min(numCtrl, 4);  // maximum of 4 SCSI controllers allowed in Hyper-V
+            int numCtrl = (SCSI.Length%64 > 0) ? 1 : 0;
+            numCtrl += SCSI.Length/64;
+            numCtrl = Math.Min(numCtrl, 4); // maximum of 4 SCSI controllers allowed in Hyper-V
             for (int i = 0; i < numCtrl; i++)
             {
-                var SCSIctrlDef = VM.NewResource(Utility.ResourceTypes.ParallelSCSIHBA, Utility.ResourceSubTypes.ControllerSCSI,
-                                    VM.GetScope());
+                var SCSIctrlDef = VM.NewResource(Utility.ResourceTypes.ParallelSCSIHBA,
+                                                 Utility.ResourceSubTypes.ControllerSCSI,
+                                                 VM.GetScope());
                 SCSIctrlDef["Limit"] = 4;
                 var SCSIctrl = VM.AddDevice(SCSIctrlDef);
-                if (SCSIctrl==null)
+                if (SCSIctrl == null)
                 {
-                    WriteWarning("Failed to add SCSI controller ("+i+")");
+                    WriteWarning("Failed to add SCSI controller (" + i + ")");
                     continue;
                 }
                 int num = Math.Min(SCSI.Length, 64);
@@ -180,7 +203,7 @@ namespace VMProvisioningAgent
                 foreach (string drive in tmp)
                 {
                     if (!VM.AttachVHD(drive, SCSIctrl))
-                        WriteWarning("Failed to attach drive to SCSI controller ("+i+"):  "+drive);
+                        WriteWarning("Failed to attach drive to SCSI controller (" + i + "):  " + drive);
                 }
             }
 
@@ -188,11 +211,11 @@ namespace VMProvisioningAgent
             foreach (string nic in NIC)
             {
                 if (!VM.AddNIC(nic))
-                    WriteWarning("Failed to add Synthetic NIC: "+nic);
+                    WriteWarning("Failed to add Synthetic NIC: " + nic);
             }
             foreach (string nic in LegacyNIC)
-            {    
-                if(!VM.AddNIC(nic, true))
+            {
+                if (!VM.AddNIC(nic, true))
                     WriteWarning("Failed to add Legacy NIC: " + nic);
             }
 
@@ -203,16 +226,13 @@ namespace VMProvisioningAgent
     [Cmdlet("Destroy", "VM")]
     public class DestroyVM : RestableCmdlet<DestroyVM>
     {
-        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
-        [Alias("VM")]
-        [ValidateNotNullOrEmpty]
-        public string Name;
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)] [Alias("VM")] [ValidateNotNullOrEmpty] public string Name;
 
         /// <summary>
         /// Setting this switch will attemt to delete all VHDs currently attached to the specified VM.
         /// </summary>
         [Parameter] public SwitchParameter DeleteVHDs = false;
-        
+
         protected override void ProcessRecord()
         {
             // must use this to support processing record remotely.
@@ -238,7 +258,7 @@ namespace VMProvisioningAgent
             IEnumerable<string> vhds = DeleteVHDs ? VM.GetVHDs() : new string[0];
             bool success = VM.DestroyVM();
             if (success)
-            {                
+            {
                 foreach (string vhd in vhds)
                 {
                     try
@@ -262,21 +282,13 @@ namespace VMProvisioningAgent
     [Cmdlet(VerbsCommunications.Read, "VMRegistry", DefaultParameterSetName = "Machine")]
     public class ReadVMRegistry : RestableCmdlet<ReadVMRegistry>
     {
-        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
-        [Alias("Drive", "Root")]
-        [ValidateNotNullOrEmpty]
-        public string VHD;
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)] [Alias("Drive", "Root")] [ValidateNotNullOrEmpty] public string VHD;
 
-        [Parameter(Mandatory = true, ParameterSetName = "User")]
-        [Alias("UserName")]
-        public string User;
+        [Parameter(Mandatory = true, ParameterSetName = "User")] [Alias("UserName")] public string User;
 
-        [Parameter(Mandatory = true)]
-        [Alias("RegistryPath")]
-        public string DataPath;
+        [Parameter(Mandatory = true)] [Alias("RegistryPath")] public string DataPath;
 
-        [Parameter] [Alias("Interface")]
-        public string AlternateInterface = BaseCmdlets.DefaultImplementation;
+        [Parameter] [Alias("Interface")] public string AlternateInterface = BaseCmdlets.DefaultImplementation;
 
 
         protected override void ProcessRecord()
@@ -288,15 +300,21 @@ namespace VMProvisioningAgent
                 return;
             }
 
-            IVMStateEditor editor = PluginLoader.GetInterface(AlternateInterface) ?? Task<IVMStateEditor>.Factory.StartNew(() =>
-                {
-                    PluginLoader.ScanForPlugins();
-                    return PluginLoader.GetInterface(AlternateInterface);
-                }).Result;
+            IVMStateEditor editor = PluginLoader.GetInterface(AlternateInterface) ??
+                                    Task<IVMStateEditor>.Factory.StartNew(() =>
+                                        {
+                                            PluginLoader.ScanForPlugins();
+                                            return PluginLoader.GetInterface(AlternateInterface);
+                                        }).Result;
 
             if (editor == null)
             {
-                ThrowTerminatingError(new ErrorRecord(new FileNotFoundException(String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.", AlternateInterface)), "Interface failed to load.", ErrorCategory.InvalidArgument, null));
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        new FileNotFoundException(
+                            String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.",
+                                          AlternateInterface)), "Interface failed to load.",
+                        ErrorCategory.InvalidArgument, null));
                 return;
             }
 
@@ -304,7 +322,7 @@ namespace VMProvisioningAgent
             var value = ParameterSetName.Equals("User", StringComparison.InvariantCultureIgnoreCase)
                             ? editor.ReadUserRegistry(out readStatus, VHD, User, DataPath)
                             : editor.ReadMachineRegistry(out readStatus, VHD, DataPath);
-            
+
             WriteObject(new
                 {
                     Value = value,
@@ -316,30 +334,17 @@ namespace VMProvisioningAgent
     [Cmdlet(VerbsCommunications.Write, "VMRegistry", DefaultParameterSetName = "Machine")]
     public class WriteVMRegistry : RestableCmdlet<WriteVMRegistry>
     {
-        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
-        [Alias("Drive", "Root")]
-        [ValidateNotNullOrEmpty]
-        public string VHD;
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)] [Alias("Drive", "Root")] [ValidateNotNullOrEmpty] public string VHD;
 
-        [Parameter(Mandatory = true, ParameterSetName = "User")]
-        [Alias("UserName")]
-        public string User;
+        [Parameter(Mandatory = true, ParameterSetName = "User")] [Alias("UserName")] public string User;
 
-        [Parameter(Mandatory = true)]
-        [Alias("RegistryPath")]
-        public string DataPath;
+        [Parameter(Mandatory = true)] [Alias("RegistryPath")] public string DataPath;
 
-        [Parameter(Mandatory = true)]
-        [Alias("RegistryPath")]
-        public object Data;
+        [Parameter(Mandatory = true)] [Alias("RegistryPath")] public object Data;
 
-        [Parameter]
-        [Alias("RegistryPath")]
-        public string DataType = "string";
+        [Parameter] [Alias("RegistryPath")] public string DataType = "string";
 
-        [Parameter]
-        [Alias("Interface")]
-        public string AlternateInterface = BaseCmdlets.DefaultImplementation;
+        [Parameter] [Alias("Interface")] public string AlternateInterface = BaseCmdlets.DefaultImplementation;
 
 
         protected override void ProcessRecord()
@@ -351,22 +356,28 @@ namespace VMProvisioningAgent
                 return;
             }
 
-            IVMStateEditor editor = PluginLoader.GetInterface(AlternateInterface) ?? Task<IVMStateEditor>.Factory.StartNew(() =>
-            {
-                PluginLoader.ScanForPlugins();
-                return PluginLoader.GetInterface(AlternateInterface);
-            }).Result;
+            IVMStateEditor editor = PluginLoader.GetInterface(AlternateInterface) ??
+                                    Task<IVMStateEditor>.Factory.StartNew(() =>
+                                        {
+                                            PluginLoader.ScanForPlugins();
+                                            return PluginLoader.GetInterface(AlternateInterface);
+                                        }).Result;
 
             if (editor == null)
             {
-                ThrowTerminatingError(new ErrorRecord(new FileNotFoundException(String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.", AlternateInterface)), "Interface failed to load.", ErrorCategory.InvalidArgument, null));
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        new FileNotFoundException(
+                            String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.",
+                                          AlternateInterface)), "Interface failed to load.",
+                        ErrorCategory.InvalidArgument, null));
                 return;
             }
 
             WriteObject(
                 ParameterSetName.Equals("User", StringComparison.InvariantCultureIgnoreCase)
-                            ? editor.WriteUserRegistry(VHD, User, DataPath, Data, DataType)
-                            : editor.WriteMachineRegistry(VHD, DataPath, Data, DataType)
+                    ? editor.WriteUserRegistry(VHD, User, DataPath, Data, DataType)
+                    : editor.WriteMachineRegistry(VHD, DataPath, Data, DataType)
                 );
         }
     }
@@ -377,10 +388,7 @@ namespace VMProvisioningAgent
     public class MountVMVHD : RestableCmdlet<MountVMVHD>
     {
 
-        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
-        [Alias("Drive", "Root")]
-        [ValidateNotNullOrEmpty]
-        public string VHD;
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)] [Alias("Drive", "Root")] [ValidateNotNullOrEmpty] public string VHD;
 
 /*
         [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
@@ -389,9 +397,7 @@ namespace VMProvisioningAgent
         public string Proxy;
 */
 
-        [Parameter]
-        [Alias("Interface")]
-        public string AlternateInterface = BaseCmdlets.DefaultImplementation;
+        [Parameter] [Alias("Interface")] public string AlternateInterface = BaseCmdlets.DefaultImplementation;
 
         protected override void ProcessRecord()
         {
@@ -402,15 +408,21 @@ namespace VMProvisioningAgent
                 return;
             }
 
-            IVMStateEditor IF = PluginLoader.GetInterface(AlternateInterface) ?? Task<IVMStateEditor>.Factory.StartNew(() =>
-            {
-                PluginLoader.ScanForPlugins();
-                return PluginLoader.GetInterface(AlternateInterface);
-            }).Result;
+            IVMStateEditor IF = PluginLoader.GetInterface(AlternateInterface) ??
+                                Task<IVMStateEditor>.Factory.StartNew(() =>
+                                    {
+                                        PluginLoader.ScanForPlugins();
+                                        return PluginLoader.GetInterface(AlternateInterface);
+                                    }).Result;
 
             if (IF == null)
             {
-                ThrowTerminatingError(new ErrorRecord(new FileNotFoundException(String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.", AlternateInterface)), "Interface failed to load.", ErrorCategory.InvalidArgument, null));
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        new FileNotFoundException(
+                            String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.",
+                                          AlternateInterface)), "Interface failed to load.",
+                        ErrorCategory.InvalidArgument, null));
                 return;
             }
 
@@ -428,10 +440,7 @@ namespace VMProvisioningAgent
     [Cmdlet(VerbsData.Dismount, "VMVHD")]
     public class DismountVMVHD : RestableCmdlet<DismountVMVHD>
     {
-        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
-        [Alias("Drive", "Root")]
-        [ValidateNotNullOrEmpty]
-        public string VHD;
+        [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)] [Alias("Drive", "Root")] [ValidateNotNullOrEmpty] public string VHD;
 
 /*
         [Parameter(Mandatory = true, Position = 0, ValueFromPipeline = true)]
@@ -440,9 +449,7 @@ namespace VMProvisioningAgent
         public string Proxy;
 */
 
-        [Parameter]
-        [Alias("Interface")]
-        public string AlternateInterface = BaseCmdlets.DefaultImplementation;
+        [Parameter] [Alias("Interface")] public string AlternateInterface = BaseCmdlets.DefaultImplementation;
 
         protected override void ProcessRecord()
         {
@@ -453,15 +460,21 @@ namespace VMProvisioningAgent
                 return;
             }
 
-            IVMStateEditor IF = PluginLoader.GetInterface(AlternateInterface) ?? Task<IVMStateEditor>.Factory.StartNew(() =>
-            {
-                PluginLoader.ScanForPlugins();
-                return PluginLoader.GetInterface(AlternateInterface);
-            }).Result;
+            IVMStateEditor IF = PluginLoader.GetInterface(AlternateInterface) ??
+                                Task<IVMStateEditor>.Factory.StartNew(() =>
+                                    {
+                                        PluginLoader.ScanForPlugins();
+                                        return PluginLoader.GetInterface(AlternateInterface);
+                                    }).Result;
 
             if (IF == null)
             {
-                ThrowTerminatingError(new ErrorRecord(new FileNotFoundException(String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.", AlternateInterface)), "Interface failed to load.", ErrorCategory.InvalidArgument, null));
+                ThrowTerminatingError(
+                    new ErrorRecord(
+                        new FileNotFoundException(
+                            String.Format("Unable to load the assembly containing a IVMStateEditor named '{0}'.",
+                                          AlternateInterface)), "Interface failed to load.",
+                        ErrorCategory.InvalidArgument, null));
                 return;
             }
 
@@ -475,27 +488,21 @@ namespace VMProvisioningAgent
     [Cmdlet(VerbsData.Compare, "VHD")]
     public class CompareVHD : RestableCmdlet<CompareVHD>
     {
-        [Parameter(Mandatory = true, Position = 0)]
-        [ValidateNotNullOrEmpty]
-        public string VHD0;
+        [Parameter(Mandatory = true, Position = 0)] [ValidateNotNullOrEmpty] public string VHD1;
 
-        [Parameter(Mandatory = true, Position = 1)]
-        [ValidateNotNullOrEmpty]
-        public string VHD1;
+        [Parameter(Mandatory = true, Position = 1)] [ValidateNotNullOrEmpty] public string VHD2;
 
-        [Parameter(Mandatory = true, Position = 2)]
-        [ValidateNotNullOrEmpty]
-        public string OutputRoot;
+        [Parameter(Mandatory = true, Position = 2)] [ValidateNotNullOrEmpty] public string Output;
 
-        [Parameter]
-        public SwitchParameter Registry;
+        [Parameter] [Alias("Partition1")] public int? Partition = null;
 
-        [Parameter]
-        public SwitchParameter Overwrite = false;
+        [Parameter] public int? Partition2 = null;
 
-        [Parameter]
-        [Alias("Interface")]
-        public string AlternateInterface = BaseCmdlets.DefaultImplementation;
+        [Parameter] public SwitchParameter Overwrite = false;
+
+        // [Parameter]
+        // [Alias("Interface")]
+        // public string AlternateInterface = BaseCmdlets.DefaultImplementation;
 
         protected override void ProcessRecord()
         {
@@ -505,6 +512,21 @@ namespace VMProvisioningAgent
                 ProcessRecordViaRest();
                 return;
             }
+
+            //////
+            // explore possible use of DiscUtils here.......
+            //////
+
+            if (Partition.HasValue)
+                if (Partition2.HasValue)
+                    DiffVHD.CreateDiff(VHD1, VHD2, Output, Force: Overwrite,
+                                       Partition: new Tuple<int, int>(Partition.Value, Partition2.Value));
+                else DiffVHD.CreateDiff(VHD1, VHD2, Output, Partition, Force: Overwrite);
+            else DiffVHD.CreateDiff(VHD1, VHD2, Output, Force: Overwrite);
+
+
+
+            /*  Old Way...
 
             // Am I working with existing paths or vhd files?
             string[] exts = new string[] {".vhd", ".avhd",".vhdx",".avhdx"};
@@ -526,10 +548,6 @@ namespace VMProvisioningAgent
                     return;
                 }
             }
-
-            //////
-            // explore possible use of DiscUtils here.......
-            //////
 
             bool status0 = true;
             bool status1 = true;
@@ -575,17 +593,6 @@ namespace VMProvisioningAgent
                 foreach (var file in files)
                 {
 
-                    /* This will never work
-                     * 
-                    if (file.FullName.EndsWith(FileComparison.SymLinkDecorator))
-                    {
-                        string actualName = file.FullName.Substring(0,file.FullName.Length-FileComparison.SymLinkDecorator.Length);
-                        Symlinks[actualName.Substring(loc1[i].Length)] = Symlink.GetActualPath(actualName);
-                        continue;
-                    }
-                     * 
-                     */
-                    //Doing this instead...
                     if (Symlink.IsSymlink(file.FullName))
                     {
                         Symlinks[file.FullName.Substring(loc1[i].Length)] = new Tuple<bool, string>(Directory.Exists(file.FullName), Symlink.GetActualPath(file.FullName));
@@ -639,6 +646,46 @@ namespace VMProvisioningAgent
             if (IsFile1)
                 IF.UnmountVHD(VHD1);
 
+            */
         }
     }
+
+    [Cmdlet("Apply", "VHDDiff")]
+    public class ApplyVHDDiff : RestableCmdlet<ApplyVHDDiff>
+    {
+        [Parameter(Mandatory = true, Position = 0)] [ValidateNotNullOrEmpty] public string Base;
+
+        [Parameter(Mandatory = true, Position = 1)] [ValidateNotNullOrEmpty] public string Diff;
+
+        [Parameter(Mandatory = true, Position = 2)] public string Output = null;
+
+        [Parameter] public SwitchParameter MakeDifferencingDisk = false;
+
+        [Parameter] [Alias("Partition1")] public int? Partition = null;
+
+        [Parameter] public int? Partition2 = null;
+
+        [Parameter] public SwitchParameter Overwrite = false;
+
+        // [Parameter]
+        // [Alias("Interface")]
+        // public string AlternateInterface = BaseCmdlets.DefaultImplementation;
+
+        protected override void ProcessRecord()
+        {
+            // must use this to support processing record remotely.
+            if (Remote)
+            {
+                ProcessRecordViaRest();
+                return;
+            }
+
+            if (Partition.HasValue)
+                if (Partition2.HasValue) DiffVHD.ApplyDiff(Base, Diff, Output, MakeDifferencingDisk, new Tuple<int, int>(Partition.Value, Partition2.Value));
+                else DiffVHD.ApplyDiff(Base, Diff, Output, MakeDifferencingDisk, new Tuple<int,int>(Partition.Value, Partition.Value));
+            else DiffVHD.ApplyDiff(Base, Diff, Output, MakeDifferencingDisk);
+
+        }
+    }
+
 }

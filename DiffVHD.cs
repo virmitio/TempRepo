@@ -10,10 +10,11 @@ using DiscUtils.Ext;
 using DiscUtils.Fat;
 using DiscUtils.Ntfs;
 using DiscUtils.Partitions;
+using DiscUtils.Registry;
 
 namespace VMProvisioningAgent
 {
-    class DiffVHD
+    public static class DiffVHD
     {
         public enum DiskType
         {
@@ -21,14 +22,14 @@ namespace VMProvisioningAgent
             VHDX
         }
 
-        protected const string VHDVarient = "dynamic"; // choose from "fixed" or "dynamic"
+        private const string VHDVarient = "dynamic"; // choose from "fixed" or "dynamic"
 
-        protected const string RootFiles = "FILES";
-        protected const string RootSystemRegistry = @"REGISTRY\SYSTEM";
-        protected const string RootUserRegistry = @"REGISTRY\USERS";
+        private const string RootFiles = "FILES";
+        private const string RootSystemRegistry = @"REGISTRY\\SYSTEM";
+        private const string RootUserRegistry = @"REGISTRY\\USERS";
 
-        protected static readonly string[] ExcludeFiles = new string[] { @"\PAGEFILE.SYS", @"\HIBERFIL.SYS", @"\SYSTEM VOLUME INFORMATION", @"\WINDOWS\SYSTEM32\CONFIG" };
-        protected static readonly string[] SystemRegistryFiles = new string[]
+        private static readonly string[] ExcludeFiles = new string[] { @"\PAGEFILE.SYS", @"\HIBERFIL.SYS", @"\SYSTEM VOLUME INFORMATION", @"\WINDOWS\SYSTEM32\CONFIG" };
+        private static readonly string[] SystemRegistryFiles = new string[]
             {
                 String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\BCD-TEMPLATE",RootFiles),
                 String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\COMPONENTS",RootFiles),
@@ -42,7 +43,9 @@ namespace VMProvisioningAgent
                 String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SYSTEMPROFILE\NTUSER.DAT",RootFiles),
             };
 
-        protected static readonly Regex UserRegisrtyFiles = new Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
+        private static readonly Regex UserRegisrtyFiles = new Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
+        private static Regex GetUserRegex(string Username) { return new Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\" + Username + @"\\ntuser.dat$", RegexOptions.IgnoreCase); }
+        private static readonly Regex DiffUserRegistry = new Regex(@"^\\?" + RootUserRegistry + @"\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
 
         /// <summary>
         /// 
@@ -54,7 +57,7 @@ namespace VMProvisioningAgent
         /// <param name="Force">If true, will overwrite the Output file if it already exists.  Defaults to 'false'.</param>
         /// <param name="Partition">The 0-indexed partition number to compare from each disk file.</param>
         /// <returns></returns>
-        public static void CreateDiff(string OldVHD, string NewVHD, string Output, DiskType OutputType = DiskType.VHD, bool Force = false, int? Partition = null)
+        public static void CreateDiff(string OldVHD, string NewVHD, string Output, int? Partition, DiskType OutputType = DiskType.VHD, bool Force = false)
         {
             CreateDiff(OldVHD, NewVHD, Output, OutputType, Force, Partition.HasValue ? new Tuple<int, int>(Partition.Value, Partition.Value) : null);
         }
@@ -82,7 +85,7 @@ namespace VMProvisioningAgent
 
             using (Old)
             using (New)
-            using (var OutFS = new FileStream(OldVHD, Force ? FileMode.Create : FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+            using (var OutFS = new FileStream(Output, Force ? FileMode.Create : FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
             {
 
                 // Check type of filesystems being compared
@@ -152,6 +155,9 @@ namespace VMProvisioningAgent
                             var partIndex = OutParts.Create(Math.Max(Old.Partitions[i].SectorCount * Old.Parameters.BiosGeometry.BytesPerSector, 
                                                                      New.Partitions[i].SectorCount * New.Parameters.BiosGeometry.BytesPerSector), 
                                                             GetPartitionType(Old.Partitions[i]), false);
+                            //////////////
+                            //// There's an issue here with the Out filesystem not being formatted/initialized.  Need to do something about that somehow.
+                            //////////////
                             DiffPart(DetectFileSystem(Old.Partitions[i]),
                                      DetectFileSystem(New.Partitions[i]),
                                      DetectFileSystem(OutParts[partIndex]),
@@ -237,6 +243,8 @@ namespace VMProvisioningAgent
 
             CompareTree(RootA, RootB, OutFileRoot, Style);
 
+
+            // Now handle registry files (if any)
             foreach (var file in OutFileRoot.GetFiles("*", SearchOption.AllDirectories).Where(dfi => SystemRegistryFiles.Contains(dfi.FullName)))
             {
                 var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
@@ -452,7 +460,60 @@ namespace VMProvisioningAgent
 
         private static void ApplyPartDiff(PartitionInfo Base, PartitionInfo Diff)
         {
-            ///////////////////////////////////////////////////////////////////////////////////////////////////////////
+            var BFS = DetectFileSystem(Base);
+            var DFS = DetectFileSystem(Diff);
+
+            if (BFS is NtfsFileSystem)
+            {
+                ((NtfsFileSystem)BFS).NtfsOptions.HideHiddenFiles = false;
+                ((NtfsFileSystem)BFS).NtfsOptions.HideSystemFiles = false;
+            }
+            if (DFS is NtfsFileSystem)
+            {
+                ((NtfsFileSystem)DFS).NtfsOptions.HideHiddenFiles = false;
+                ((NtfsFileSystem)DFS).NtfsOptions.HideSystemFiles = false;
+            }
+
+            var DRoot = DFS.Root;
+
+            var DFileRoot = DRoot.GetDirectories(RootFiles).Single();
+
+            foreach (var file in DFileRoot.GetFiles("*", SearchOption.AllDirectories))
+            {
+                var BFile = BFS.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
+                Stream OutStream;
+                if (BFile.Exists) OutStream = BFile.Open(FileMode.Truncate, FileAccess.ReadWrite);
+                else OutStream = BFile.Create();
+                using (var InStream = file.OpenRead())
+                using (OutStream)
+                    InStream.CopyTo(OutStream);
+            }
+
+            var DsysReg = DRoot.GetDirectories(RootSystemRegistry).Single();
+            foreach (var file in DsysReg.GetFiles("*", SearchOption.AllDirectories))
+            {
+                var BReg = BFS.GetFileInfo(file.FullName.Substring(RootSystemRegistry.Length + 1));
+                if (!BReg.Exists) file.OpenRead().CopyTo(BReg.Create());
+                else
+                {
+                    var BHive = new RegistryHive(BReg.Open(FileMode.Open, FileAccess.ReadWrite));
+                    RegDiff.ReadFromStream(file.OpenRead()).ApplyTo(BHive.Root);
+                }
+            }
+
+            var DuserReg = DRoot.GetDirectories(RootUserRegistry).Single();
+            var Bfiles = BFS.GetFiles(String.Empty, "*", SearchOption.AllDirectories).Where(str => UserRegisrtyFiles.IsMatch(str)).ToArray();
+            foreach (var file in DuserReg.GetFiles("*", SearchOption.AllDirectories))
+            {
+                var username = DiffUserRegistry.Match(file.FullName).Groups["user"].Value;
+                var userFile = Bfiles.Where(str => GetUserRegex(username).IsMatch(str)).ToArray();
+                if (!userFile.Any()) continue;
+                var BReg = BFS.GetFileInfo(userFile.Single());
+                if (!BReg.Exists) continue;
+                var BHive = new RegistryHive(BReg.Open(FileMode.Open, FileAccess.ReadWrite));
+                RegDiff.ReadFromStream(file.OpenRead()).ApplyTo(BHive.Root);
+            }
+            
         }
     }
 }

@@ -849,8 +849,8 @@ namespace VMProvisioningAgent
     }
 
 
-    /*  Unused native-access class:  RegExtra
-    internal class RegExtra
+    //  mostly Unused native-access class:  RegExtra
+    public class RegExtra
     {
         [StructLayout(LayoutKind.Sequential)]
         public struct LUID
@@ -952,6 +952,6 @@ namespace VMProvisioningAgent
         }
 
     }
-    */
+    
 
 }
