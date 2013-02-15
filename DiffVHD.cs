@@ -28,23 +28,23 @@ namespace VMProvisioningAgent
         private const string RootSystemRegistry = @"REGISTRY\\SYSTEM";
         private const string RootUserRegistry = @"REGISTRY\\USERS";
 
-        private static readonly string[] ExcludeFiles = new string[] { @"\PAGEFILE.SYS", @"\HIBERFIL.SYS", @"\SYSTEM VOLUME INFORMATION", @"\WINDOWS\SYSTEM32\CONFIG" };
+        private static readonly string[] ExcludeFiles = new string[] { @"PAGEFILE.SYS", @"HIBERFIL.SYS", @"SYSTEM VOLUME INFORMATION"};//, @"WINDOWS\SYSTEM32\CONFIG" };
         private static readonly string[] SystemRegistryFiles = new string[]
             {
-                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\BCD-TEMPLATE",RootFiles),
-                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\COMPONENTS",RootFiles),
-                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\DEFAULT",RootFiles),
-                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\DRIVERS",RootFiles),
-                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\FP",RootFiles),
-                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SAM",RootFiles),
-                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SECURITY",RootFiles),
-                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SOFTWARE",RootFiles),
-                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SYSTEM",RootFiles),
-                String.Format(@"\{0}\WINDOWS\SYSTEM32\CONFIG\SYSTEMPROFILE\NTUSER.DAT",RootFiles),
+                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\BCD-TEMPLATE",RootFiles),
+                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\COMPONENTS",RootFiles),
+                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\DEFAULT",RootFiles),
+                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\DRIVERS",RootFiles),
+                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\FP",RootFiles),
+                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SAM",RootFiles),
+                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SECURITY",RootFiles),
+                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SOFTWARE",RootFiles),
+                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SYSTEM",RootFiles),
+                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SYSTEMPROFILE\NTUSER.DAT",RootFiles),
             };
 
-        private static readonly Regex UserRegisrtyFiles = new Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
-        private static Regex GetUserRegex(string Username) { return new Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\" + Username + @"\\ntuser.dat$", RegexOptions.IgnoreCase); }
+        private static readonly Regex UserRegisrtyFiles = new Regex(@"^.*\\?(?<parentDir>Documents and Settings|Users)\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
+        private static Regex GetUserRegex(string Username) { return new Regex(@"^.*\\?(?<parentDir>Documents and Settings|Users)\\" + Username + @"\\ntuser.dat$", RegexOptions.IgnoreCase); }
         private static readonly Regex DiffUserRegistry = new Regex(@"^\\?" + RootUserRegistry + @"\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
 
         /// <summary>
@@ -143,9 +143,10 @@ namespace VMProvisioningAgent
                     if (Partition != null)
                     {
                         OutParts.Create(GetPartitionType(Old.Partitions[Partition.Item1]), false); // there is no need (ever) for a VHD diff to have bootable partitions
+                        var OutFileSystem = Out.FormatPartition(0);
                         DiffPart(DetectFileSystem(Old.Partitions[Partition.Item1]),
                                  DetectFileSystem(New.Partitions[Partition.Item2]),
-                                 DetectFileSystem(OutParts[0]),  // As we made the partition spen the entire drive, it should be the only partition
+                                 OutFileSystem,  // As we made the partition spen the entire drive, it should be the only partition
                                  Style);
                     }
                     else // Partition == null
@@ -155,12 +156,11 @@ namespace VMProvisioningAgent
                             var partIndex = OutParts.Create(Math.Max(Old.Partitions[i].SectorCount * Old.Parameters.BiosGeometry.BytesPerSector, 
                                                                      New.Partitions[i].SectorCount * New.Parameters.BiosGeometry.BytesPerSector), 
                                                             GetPartitionType(Old.Partitions[i]), false);
-                            //////////////
-                            //// There's an issue here with the Out filesystem not being formatted/initialized.  Need to do something about that somehow.
-                            //////////////
+                            var OutFileSystem = Out.FormatPartition(partIndex);
+                            
                             DiffPart(DetectFileSystem(Old.Partitions[i]),
                                      DetectFileSystem(New.Partitions[i]),
-                                     DetectFileSystem(OutParts[partIndex]),
+                                     OutFileSystem,
                                      Style);
                         }
                     }
@@ -295,27 +295,31 @@ namespace VMProvisioningAgent
             BinaryOnly,
         }
         
+        // TODO:  I *Really* need to make this execute thread parallel.
         private static void CompareTree(DiscDirectoryInfo A, DiscDirectoryInfo B, DiscDirectoryInfo Out,
                                         ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
             var Afiles = A.GetFiles();
-            foreach (var file in B.GetFiles().Where(file => !ExcludeFiles.Contains(file.FullName) && (!Afiles.Contains(file, 
+            var BFiles = B.GetFiles().Where(file => !ExcludeFiles.Contains(file.FullName.ToUpperInvariant()) && (!Afiles.Contains(file, 
                                                             new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
                                                                                        (a, b) => a.Name.Equals(b.Name),
                                                                                        d => d.Name.GetHashCode())) ||
-                                                            CompareFile(A.GetFiles(file.Name).Single(), file, Style))))
+                                                            !CompareFile(A.GetFiles(file.Name).Single(), file, Style))).ToArray();
+            if (BFiles.Any() && !Out.Exists) Out.Create();
+
+            foreach (var file in BFiles)
             {
                 CopyFile(file, Out.FileSystem.GetFileInfo(Path.Combine(Out.FullName, file.Name)), true);
             }
 
             var Asubs = A.GetDirectories();
-            foreach (var subdir in B.GetDirectories().Where(subdir => !ExcludeFiles.Contains(subdir.FullName)))
+            foreach (var subdir in B.GetDirectories().Where(subdir => !ExcludeFiles.Contains(subdir.FullName.ToUpperInvariant())))
             {
                 if (Asubs.Contains(subdir, new ClrPlus.Core.Extensions.EqualityComparer<DiscDirectoryInfo>(
                                                (a, b) => a.Name.Equals(b.Name),
                                                d => d.Name.GetHashCode())))
                 {
-                    CompareTree(A.GetDirectories(subdir.Name).Single(), subdir, Out, Style);
+                    CompareTree(A.GetDirectories(subdir.Name).Single(), subdir, Out.FileSystem.GetDirectoryInfo(Path.Combine(Out.FullName, subdir.Name)), Style);
                 }
                 else
                 {
@@ -515,5 +519,25 @@ namespace VMProvisioningAgent
             }
             
         }
+
+        // Extension method to handle partition formatting
+        private static DiscFileSystem FormatPartition(this VirtualDisk Disk, int PartitionIndex)
+        {
+            var type = GetPartitionType(Disk.Partitions[PartitionIndex]);
+            switch (type)
+            {
+                case WellKnownPartitionType.WindowsFat:
+                    return DiscUtils.Fat.FatFileSystem.FormatPartition(Disk, PartitionIndex, null);
+                case WellKnownPartitionType.WindowsNtfs:
+                    return NtfsFileSystem.Format(Disk.Partitions[PartitionIndex].Open(), null, Disk.Geometry,
+                                                 Disk.Partitions[PartitionIndex].FirstSector,
+                                                 Disk.Partitions[PartitionIndex].SectorCount);
+                case WellKnownPartitionType.Linux:
+                    // return ExtFileSystem.Format(...);
+                default:
+                    return null;
+            }
+        }
+
     }
 }
