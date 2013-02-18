@@ -4,6 +4,9 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using ClrPlus.Core.Collections;
 using ClrPlus.Core.Exceptions;
 using DiscUtils;
 using DiscUtils.Ext;
@@ -213,7 +216,7 @@ namespace VMProvisioningAgent
             }
         }
 
-        private static void DiffPart(DiscFileSystem PartA, DiscFileSystem PartB, DiscFileSystem Output, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
+        private static void DiffPart(DiscFileSystem PartA, DiscFileSystem PartB, DiscFileSystem Output, ComparisonStyle Style = ComparisonStyle.DateTimeOnly, CopyQueue WriteQueue = null)
         {
             if (PartA == null) throw new ArgumentNullException("PartA");
             if (PartB == null) throw new ArgumentNullException("PartB");
@@ -235,14 +238,17 @@ namespace VMProvisioningAgent
                 ((NtfsFileSystem)Output).NtfsOptions.HideSystemFiles = false;
             }
 
+            if (WriteQueue == null) WriteQueue = new CopyQueue();
+
             var RootA = PartA.Root;
             var RootB = PartB.Root;
             var OutRoot = Output.Root;
             var OutFileRoot = Output.GetDirectoryInfo(RootFiles);
             if (!OutFileRoot.Exists) OutFileRoot.Create();
 
-            CompareTree(RootA, RootB, OutFileRoot, Style);
+            CompareTree(RootA, RootB, OutFileRoot, WriteQueue, Style);
 
+            WriteQueue.Go().Wait();
 
             // Now handle registry files (if any)
             foreach (var file in OutFileRoot.GetFiles("*", SearchOption.AllDirectories).Where(dfi => SystemRegistryFiles.Contains(dfi.FullName)))
@@ -293,13 +299,25 @@ namespace VMProvisioningAgent
             DateTimeOnly,
             /// <summary> For each pair of files with same name, compares size and binary content regardless of DateTime. </summary>
             BinaryOnly,
+            /// <summary> For each pair of files, compares the NTFS journal sequence numbers.  NTFS only. </summary>
+            Journaled,
         }
         
         // TODO:  I *Really* need to make this execute thread parallel.
         private static void CompareTree(DiscDirectoryInfo A, DiscDirectoryInfo B, DiscDirectoryInfo Out,
-                                        ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
+                                        CopyQueue WriteQueue, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
-            var Afiles = A.GetFiles();
+            CompTree(A, B, Out, WriteQueue, Style).Wait();
+        }
+
+
+        private static Task CompTree(DiscDirectoryInfo A, DiscDirectoryInfo B, DiscDirectoryInfo Out,
+                                        CopyQueue WriteQueue, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
+        {
+            if (WriteQueue == null) throw new ArgumentNullException("WriteQueue");
+            List<Task> tasks = new List<Task>();
+            var Afiles = A.GetFiles().AsParallel();
+
             var BFiles = B.GetFiles().Where(file => !ExcludeFiles.Contains(file.FullName.ToUpperInvariant()) && (!Afiles.Contains(file, 
                                                             new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
                                                                                        (a, b) => a.Name.Equals(b.Name),
@@ -309,23 +327,26 @@ namespace VMProvisioningAgent
 
             foreach (var file in BFiles)
             {
-                CopyFile(file, Out.FileSystem.GetFileInfo(Path.Combine(Out.FullName, file.Name)), true);
+                WriteQueue.Add(file, Out.FileSystem.GetFileInfo(Path.Combine(Out.FullName, file.Name)));
             }
 
-            var Asubs = A.GetDirectories();
+            var Asubs = A.GetDirectories().AsParallel();
             foreach (var subdir in B.GetDirectories().Where(subdir => !ExcludeFiles.Contains(subdir.FullName.ToUpperInvariant())))
             {
+                DiscDirectoryInfo sub = subdir;
                 if (Asubs.Contains(subdir, new ClrPlus.Core.Extensions.EqualityComparer<DiscDirectoryInfo>(
                                                (a, b) => a.Name.Equals(b.Name),
                                                d => d.Name.GetHashCode())))
                 {
-                    CompareTree(A.GetDirectories(subdir.Name).Single(), subdir, Out.FileSystem.GetDirectoryInfo(Path.Combine(Out.FullName, subdir.Name)), Style);
+                    tasks.Add(CompTree(A.GetDirectories(sub.Name).Single(), sub, Out.FileSystem.GetDirectoryInfo(Path.Combine(Out.FullName, sub.Name)), WriteQueue, Style));
                 }
                 else
                 {
-                    CopyTree(subdir, Out.FileSystem.GetDirectoryInfo(Path.Combine(Out.FullName, subdir.Name)), true);
+                    tasks.Add(Task.Factory.StartNew(() => 
+                        CopyTree(sub, Out.FileSystem.GetDirectoryInfo(Path.Combine(Out.FullName, sub.Name)), WriteQueue), TaskCreationOptions.AttachedToParent));
                 }
             }
+            return Task.Factory.StartNew(() => Task.WaitAll(tasks.ToArray()), TaskCreationOptions.AttachedToParent);
         }
 
         /// <summary>
@@ -338,6 +359,17 @@ namespace VMProvisioningAgent
         private static bool CompareFile(DiscFileInfo A, DiscFileInfo B, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
             if (A == null || B == null) return A == B;
+
+            if (Style == ComparisonStyle.Journaled)
+                if (A.FileSystem is NtfsFileSystem)
+                {
+                    var An = A.FileSystem as NtfsFileSystem;
+                    var Bn = (NtfsFileSystem) (B.FileSystem);
+                    return An.GetMasterFileTable()[An.GetFileId(A.FullName)].LogFileSequenceNumber ==
+                           Bn.GetMasterFileTable()[Bn.GetFileId(B.FullName)].LogFileSequenceNumber;
+                }
+                else throw new ArgumentException("Journal comparison only functions on NTFS partitions.", "Style");
+
             return A.Length == B.Length &&
                    (Style == ComparisonStyle.NameOnly || (Style == ComparisonStyle.BinaryOnly
                                                               ? FilesMatch(A, B)
@@ -378,41 +410,20 @@ namespace VMProvisioningAgent
             return true;
         }
 
-        private static bool CopyTree(DiscDirectoryInfo Source, DiscDirectoryInfo Destination, bool Force)
+        private static void CopyTree(DiscDirectoryInfo Source, DiscDirectoryInfo Destination, CopyQueue WriteQueue)
         {
-            if (!Force && Destination.Exists && Destination.GetFileSystemInfos().Any()) return false;
             if (!Source.Exists) throw new ArgumentException("Source directory does not exist.", "Source");
 
-            bool retVal = true;
-            if (!Destination.Exists) Destination.Create();
             foreach (var file in Source.GetFiles())
             {
                 var DestFile = Destination.FileSystem.GetFileInfo(Path.Combine(Destination.FullName, file.Name));
-                retVal &= CopyFile(file, DestFile, Force);
+                WriteQueue.Add(file, DestFile);
             }
 
-            return retVal && Source.GetDirectories().Aggregate(true, (current, sub) => current & CopyTree(sub, Destination.FileSystem.GetDirectoryInfo(Path.Combine(Destination.FullName, sub.Name)), Force));
+            foreach (DiscDirectoryInfo directory in Source.GetDirectories())
+                CopyTree(directory, Destination.FileSystem.GetDirectoryInfo(Path.Combine(Destination.FullName, directory.Name)), WriteQueue);
         }
 
-        private static bool CopyFile(DiscFileInfo Source, DiscFileInfo Destination, bool Force)
-        {
-            Stream sStream, dStream;
-            if (Destination.Exists)
-                if (Force) dStream = Destination.Open(FileMode.Truncate, FileAccess.ReadWrite);
-                else return false;
-            else dStream = Destination.Create();
-            using (sStream = Source.OpenRead())
-            using (dStream)
-                try
-                {
-                    sStream.CopyTo(dStream);
-                }
-                catch (Exception)
-                {
-                    return false;
-                }
-            return true;
-        }
 
         public static void ApplyDiff(string BaseVHD, string DiffVHD, string OutVHD = null, bool DifferencingOut = false, Tuple<int, int> Partition = null)
         {
@@ -540,4 +551,41 @@ namespace VMProvisioningAgent
         }
 
     }
+
+    internal class CopyQueue
+    {
+        private XDictionary<DiscFileInfo, DiscFileInfo> _queue;
+        public CopyQueue()
+        {
+            _queue = new XDictionary<DiscFileInfo, DiscFileInfo>();
+        }
+        public void Add(DiscFileInfo Source, DiscFileInfo Destination)
+        {
+            _queue[Destination] = Source;
+        }
+        public Task Go()
+        {
+            lock (this)
+            {
+                if (!_queue.Any()) return Task.Factory.StartNew(() => { return; });
+                var current = _queue.First();
+                if (!current.Key.Directory.Exists)
+                    current.Key.Directory.Create();
+                using (Stream src = current.Value.OpenRead())
+                using (Stream dest = current.Key.Exists
+                                         ? current.Key.Open(FileMode.Truncate, FileAccess.ReadWrite)
+                                         : current.Key.Create())
+                    src.CopyTo(dest);
+                _queue.Remove(current.Key);
+            }
+            return Go();
+        }
+        public bool IsEmpty()
+        {
+            lock (this)
+                return !_queue.Any();
+        }
+
+    }
+
 }
