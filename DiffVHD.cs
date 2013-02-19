@@ -350,8 +350,24 @@ namespace VMProvisioningAgent
                                                             new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
                                                                                        (a, b) => a.Name.Equals(b.Name),
                                                                                        d => d.Name.GetHashCode())))).ToArray().AsParallel();
-            lock(Alock)
-                BFiles = Btmp.Where(file => !CompareFile(A.GetFiles(file.Name).Single(), file, Style)).ToArray().AsParallel();
+            if (BFiles.Any())
+                try
+                {
+                    BFiles =
+                        Btmp.Where(file =>
+                            {
+                                DiscFileInfo[] Atmp;
+                                lock (Alock)
+                                    Atmp = A.GetFiles(file.Name);
+                                return !CompareFile(Atmp.Any() ? Atmp.Single() : null, file, Style);
+                            }
+                            ).ToArray()
+                             .AsParallel();
+                }
+                catch (Exception e)
+                {
+                    throw;
+                }
             //if (BFiles.Any() && !Out.Exists) Out.Create();
 
             foreach (var file in BFiles)
