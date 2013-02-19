@@ -500,6 +500,8 @@ namespace VMProvisioningAgent
 
         [Parameter] public SwitchParameter Overwrite = false;
 
+        [Parameter] public DiffVHD.ComparisonStyle Comparison = DiffVHD.ComparisonStyle.Journaled;
+
         // [Parameter]
         // [Alias("Interface")]
         // public string AlternateInterface = BaseCmdlets.DefaultImplementation;
@@ -520,9 +522,9 @@ namespace VMProvisioningAgent
             if (Partition.HasValue)
                 if (Partition2.HasValue)
                     DiffVHD.CreateDiff(VHD1, VHD2, Output, Force: Overwrite,
-                                       Partition: new Tuple<int, int>(Partition.Value, Partition2.Value));
-                else DiffVHD.CreateDiff(VHD1, VHD2, Output, Partition, Force: Overwrite);
-            else DiffVHD.CreateDiff(VHD1, VHD2, Output, Force: Overwrite);
+                                       Partition: new Tuple<int, int>(Partition.Value, Partition2.Value), Style: Comparison);
+                else DiffVHD.CreateDiff(VHD1, VHD2, Output, Partition, Force: Overwrite, Style: Comparison);
+            else DiffVHD.CreateDiff(VHD1, VHD2, Output, Force: Overwrite, Style: Comparison);
 
 
 

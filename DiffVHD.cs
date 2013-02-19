@@ -59,12 +59,13 @@ namespace VMProvisioningAgent
         /// <param name="OutputType">A <see cref="VMProvisioningAgent.DiffVHD.DiskType"/> which specifies the output file format.</param>
         /// <param name="Force">If true, will overwrite the Output file if it already exists.  Defaults to 'false'.</param>
         /// <param name="Partition">The 0-indexed partition number to compare from each disk file.</param>
+        /// <param name="Style"></param>
         /// <returns></returns>
-        public static void CreateDiff(string OldVHD, string NewVHD, string Output, int? Partition, DiskType OutputType = DiskType.VHD, bool Force = false)
+        public static void CreateDiff(string OldVHD, string NewVHD, string Output, int? Partition, DiskType OutputType = DiskType.VHD, bool Force = false, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
-            CreateDiff(OldVHD, NewVHD, Output, OutputType, Force, Partition.HasValue ? new Tuple<int, int>(Partition.Value, Partition.Value) : null);
+            CreateDiff(OldVHD, NewVHD, Output, OutputType, Force, Partition.HasValue ? new Tuple<int, int>(Partition.Value, Partition.Value) : null, Style: Style);
         }
-        
+
         /// <summary>
         /// 
         /// </summary>
@@ -74,6 +75,7 @@ namespace VMProvisioningAgent
         /// <param name="OutputType">A <see cref="VMProvisioningAgent.DiffVHD.DiskType"/> which specifies the output file format.</param>
         /// <param name="Force">If true, will overwrite the Output file if it already exists.  Defaults to 'false'.</param>
         /// <param name="Partition">An int tuple which declares a specific pair of partitions to compare.  The first value in the tuple will be the 0-indexed partition number from OldVHD to compare against.  The second value of the tuple will be the 0-indexed parition from NewVHD to compare with.</param>
+        /// <param name="Style"></param>
         /// <returns></returns>
         public static void CreateDiff(string OldVHD, string NewVHD, string Output, DiskType OutputType = DiskType.VHD, bool Force = false, Tuple<int, int> Partition = null, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
@@ -218,75 +220,91 @@ namespace VMProvisioningAgent
 
         private static void DiffPart(DiscFileSystem PartA, DiscFileSystem PartB, DiscFileSystem Output, ComparisonStyle Style = ComparisonStyle.DateTimeOnly, CopyQueue WriteQueue = null)
         {
-            if (PartA == null) throw new ArgumentNullException("PartA");
-            if (PartB == null) throw new ArgumentNullException("PartB");
-            if (Output == null) throw new ArgumentNullException("Output");
-
-            if (PartA is NtfsFileSystem)
+            try
             {
-                ((NtfsFileSystem)PartA).NtfsOptions.HideHiddenFiles = false;
-                ((NtfsFileSystem)PartA).NtfsOptions.HideSystemFiles = false;
-            }
-            if (PartB is NtfsFileSystem)
-            {
-                ((NtfsFileSystem)PartB).NtfsOptions.HideHiddenFiles = false;
-                ((NtfsFileSystem)PartB).NtfsOptions.HideSystemFiles = false;
-            }
-            if (Output is NtfsFileSystem)
-            {
-                ((NtfsFileSystem)Output).NtfsOptions.HideHiddenFiles = false;
-                ((NtfsFileSystem)Output).NtfsOptions.HideSystemFiles = false;
-            }
+                if (PartA == null) throw new ArgumentNullException("PartA");
+                if (PartB == null) throw new ArgumentNullException("PartB");
+                if (Output == null) throw new ArgumentNullException("Output");
 
-            if (WriteQueue == null) WriteQueue = new CopyQueue();
-
-            var RootA = PartA.Root;
-            var RootB = PartB.Root;
-            var OutRoot = Output.Root;
-            var OutFileRoot = Output.GetDirectoryInfo(RootFiles);
-            if (!OutFileRoot.Exists) OutFileRoot.Create();
-
-            CompareTree(RootA, RootB, OutFileRoot, WriteQueue, Style);
-
-            WriteQueue.Go().Wait();
-
-            // Now handle registry files (if any)
-            foreach (var file in OutFileRoot.GetFiles("*", SearchOption.AllDirectories).Where(dfi => SystemRegistryFiles.Contains(dfi.FullName)))
-            {
-                var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
-                if (!A.Exists)
+                if (PartA is NtfsFileSystem)
                 {
-                    file.FileSystem.MoveFile(file.FullName, String.Concat(RootSystemRegistry, A.FullName));
-                    continue;
+                    ((NtfsFileSystem) PartA).NtfsOptions.HideHiddenFiles = false;
+                    ((NtfsFileSystem) PartA).NtfsOptions.HideSystemFiles = false;
                 }
-                //else
-                var comp = new RegistryComparison(A.OpenRead(), file.OpenRead());
-                comp.DoCompare();
-                var diff = new RegDiff(comp, RegistryComparison.Side.B);
-                var outFile = Output.GetFileInfo(String.Concat(RootSystemRegistry, A.FullName));
-                diff.WriteToStream(outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite));
-                file.Delete(); // remove this file from the set of file to copy and overwrite
-            }
-
-            foreach (var file in OutFileRoot.GetFiles("*", SearchOption.AllDirectories).Where(dfi => UserRegisrtyFiles.IsMatch(dfi.FullName)))
-            {
-                // Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
-                var match = UserRegisrtyFiles.Match(file.FullName);
-                var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
-                if (!A.Exists)
+                if (PartB is NtfsFileSystem)
                 {
-                    file.FileSystem.MoveFile(file.FullName, Path.Combine(RootUserRegistry, match.Groups["user"].Value, A.Name));
-                    continue;
+                    ((NtfsFileSystem) PartB).NtfsOptions.HideHiddenFiles = false;
+                    ((NtfsFileSystem) PartB).NtfsOptions.HideSystemFiles = false;
                 }
-                //else
-                var comp = new RegistryComparison(A.OpenRead(), file.OpenRead());
-                comp.DoCompare();
-                var diff = new RegDiff(comp, RegistryComparison.Side.B);
-                var outFile = Output.GetFileInfo(Path.Combine(RootUserRegistry, match.Groups["user"].Value, A.FullName));
-                diff.WriteToStream(outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite));
-                file.Delete(); // remove this file from the set of file to copy and overwrite
-            }
+                if (Output is NtfsFileSystem)
+                {
+                    ((NtfsFileSystem) Output).NtfsOptions.HideHiddenFiles = false;
+                    ((NtfsFileSystem) Output).NtfsOptions.HideSystemFiles = false;
+                }
 
+                if (WriteQueue == null) WriteQueue = new CopyQueue();
+
+                var RootA = PartA.Root;
+                var RootB = PartB.Root;
+                var OutRoot = Output.Root;
+                var OutFileRoot = Output.GetDirectoryInfo(RootFiles);
+                if (!OutFileRoot.Exists) OutFileRoot.Create();
+
+                CompareTree(RootA, RootB, OutFileRoot, WriteQueue, Style);
+
+                WriteQueue.Go().Wait();
+
+                // Now handle registry files (if any)
+                foreach (
+                    var file in
+                        OutFileRoot.GetFiles("*", SearchOption.AllDirectories)
+                                   .Where(dfi => SystemRegistryFiles.Contains(dfi.FullName)))
+                {
+                    var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
+                    if (!A.Exists)
+                    {
+                        file.FileSystem.MoveFile(file.FullName, String.Concat(RootSystemRegistry, A.FullName));
+                        continue;
+                    }
+                    //else
+                    var comp = new RegistryComparison(A.OpenRead(), file.OpenRead());
+                    comp.DoCompare();
+                    var diff = new RegDiff(comp, RegistryComparison.Side.B);
+                    var outFile = Output.GetFileInfo(String.Concat(RootSystemRegistry, A.FullName));
+                    diff.WriteToStream(outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew,
+                                                    FileAccess.ReadWrite));
+                    file.Delete(); // remove this file from the set of file to copy and overwrite
+                }
+
+                foreach (
+                    var file in
+                        OutFileRoot.GetFiles("*", SearchOption.AllDirectories)
+                                   .Where(dfi => UserRegisrtyFiles.IsMatch(dfi.FullName)))
+                {
+                    // Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
+                    var match = UserRegisrtyFiles.Match(file.FullName);
+                    var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
+                    if (!A.Exists)
+                    {
+                        file.FileSystem.MoveFile(file.FullName,
+                                                 Path.Combine(RootUserRegistry, match.Groups["user"].Value, A.Name));
+                        continue;
+                    }
+                    //else
+                    var comp = new RegistryComparison(A.OpenRead(), file.OpenRead());
+                    comp.DoCompare();
+                    var diff = new RegDiff(comp, RegistryComparison.Side.B);
+                    var outFile =
+                        Output.GetFileInfo(Path.Combine(RootUserRegistry, match.Groups["user"].Value, A.FullName));
+                    diff.WriteToStream(outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew,
+                                                    FileAccess.ReadWrite));
+                    file.Delete(); // remove this file from the set of file to copy and overwrite
+                }
+            }
+            catch (InvalidOperationException e)
+            {
+                throw;
+            }
         }
 
         public enum ComparisonStyle
@@ -313,37 +331,63 @@ namespace VMProvisioningAgent
 
         private static Task CompTree(DiscDirectoryInfo A, DiscDirectoryInfo B, DiscDirectoryInfo Out,
                                         CopyQueue WriteQueue, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
+        
         {
             if (WriteQueue == null) throw new ArgumentNullException("WriteQueue");
             List<Task> tasks = new List<Task>();
-            var Afiles = A.GetFiles().AsParallel();
 
-            var BFiles = B.GetFiles().Where(file => !ExcludeFiles.Contains(file.FullName.ToUpperInvariant()) && (!Afiles.Contains(file, 
+            DiscFileSystem Alock = A.FileSystem;
+            DiscFileSystem Block = B.FileSystem;
+            DiscFileSystem Olock = Out.FileSystem;
+
+            DiscFileInfo[] Afiles; 
+            lock(Alock)
+                Afiles = A.GetFiles();
+            DiscFileInfo[] Btmp;
+            lock(Block)
+                Btmp = B.GetFiles();
+            var BFiles = Btmp.Where(file => !ExcludeFiles.Contains(file.FullName.ToUpperInvariant()) && (!Afiles.Contains(file,
                                                             new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
                                                                                        (a, b) => a.Name.Equals(b.Name),
-                                                                                       d => d.Name.GetHashCode())) ||
-                                                            !CompareFile(A.GetFiles(file.Name).Single(), file, Style))).ToArray();
-            if (BFiles.Any() && !Out.Exists) Out.Create();
+                                                                                       d => d.Name.GetHashCode())))).ToArray().AsParallel();
+            lock(Alock)
+                BFiles = Btmp.Where(file => !CompareFile(A.GetFiles(file.Name).Single(), file, Style)).ToArray().AsParallel();
+            //if (BFiles.Any() && !Out.Exists) Out.Create();
 
             foreach (var file in BFiles)
             {
-                WriteQueue.Add(file, Out.FileSystem.GetFileInfo(Path.Combine(Out.FullName, file.Name)));
+                DiscFileInfo outFile;
+                lock (Out.FileSystem)
+                    outFile = Out.FileSystem.GetFileInfo(Path.Combine(Out.FullName, file.Name));
+                WriteQueue.Add(file, outFile);
             }
 
-            var Asubs = A.GetDirectories().AsParallel();
-            foreach (var subdir in B.GetDirectories().Where(subdir => !ExcludeFiles.Contains(subdir.FullName.ToUpperInvariant())))
+            DiscDirectoryInfo[] Asubs;
+            lock(Alock)
+                Asubs = A.GetDirectories();
+
+            DiscDirectoryInfo[] BSub;
+            lock (Block)
+                BSub = B.GetDirectories();
+            
+            foreach (var subdir in BSub.Where(subdir => !ExcludeFiles.Contains(subdir.FullName.ToUpperInvariant())))
             {
                 DiscDirectoryInfo sub = subdir;
+                DiscDirectoryInfo Oout;
+                lock (Olock)
+                    Oout = Out.FileSystem.GetDirectoryInfo(Path.Combine(Out.FullName, sub.Name));
                 if (Asubs.Contains(subdir, new ClrPlus.Core.Extensions.EqualityComparer<DiscDirectoryInfo>(
                                                (a, b) => a.Name.Equals(b.Name),
                                                d => d.Name.GetHashCode())))
                 {
-                    tasks.Add(CompTree(A.GetDirectories(sub.Name).Single(), sub, Out.FileSystem.GetDirectoryInfo(Path.Combine(Out.FullName, sub.Name)), WriteQueue, Style));
+                    DiscDirectoryInfo Ain;
+                    lock (Alock)
+                        Ain = A.GetDirectories(sub.Name).Single();
+                    tasks.Add(CompTree(Ain, sub, Oout, WriteQueue, Style));
                 }
                 else
                 {
-                    tasks.Add(Task.Factory.StartNew(() => 
-                        CopyTree(sub, Out.FileSystem.GetDirectoryInfo(Path.Combine(Out.FullName, sub.Name)), WriteQueue), TaskCreationOptions.AttachedToParent));
+                    CopyTree(sub, Oout, WriteQueue);
                 }
             }
             return Task.Factory.StartNew(() => Task.WaitAll(tasks.ToArray()), TaskCreationOptions.AttachedToParent);
@@ -363,10 +407,14 @@ namespace VMProvisioningAgent
             if (Style == ComparisonStyle.Journaled)
                 if (A.FileSystem is NtfsFileSystem)
                 {
-                    var An = A.FileSystem as NtfsFileSystem;
-                    var Bn = (NtfsFileSystem) (B.FileSystem);
-                    return An.GetMasterFileTable()[An.GetFileId(A.FullName)].LogFileSequenceNumber ==
-                           Bn.GetMasterFileTable()[Bn.GetFileId(B.FullName)].LogFileSequenceNumber;
+                    lock(A.FileSystem)
+                        lock (B.FileSystem)
+                        {
+                            var An = A.FileSystem as NtfsFileSystem;
+                            var Bn = (NtfsFileSystem) (B.FileSystem);
+                            return An.GetMasterFileTable()[An.GetFileId(A.FullName)].LogFileSequenceNumber ==
+                                   Bn.GetMasterFileTable()[Bn.GetFileId(B.FullName)].LogFileSequenceNumber;
+                        }
                 }
                 else throw new ArgumentException("Journal comparison only functions on NTFS partitions.", "Style");
 
@@ -414,14 +462,30 @@ namespace VMProvisioningAgent
         {
             if (!Source.Exists) throw new ArgumentException("Source directory does not exist.", "Source");
 
-            foreach (var file in Source.GetFiles())
+            DiscFileInfo[] files;
+            lock (Source.FileSystem)
+                files = Source.GetFiles("*", SearchOption.AllDirectories);
+            foreach (var file in files)
             {
-                var DestFile = Destination.FileSystem.GetFileInfo(Path.Combine(Destination.FullName, file.Name));
+                DiscFileInfo DestFile;
+                lock(Destination.FileSystem)
+                    DestFile = Destination.FileSystem.GetFileInfo(Path.Combine(Destination.FullName, file.Name));
                 WriteQueue.Add(file, DestFile);
             }
 
-            foreach (DiscDirectoryInfo directory in Source.GetDirectories())
-                CopyTree(directory, Destination.FileSystem.GetDirectoryInfo(Path.Combine(Destination.FullName, directory.Name)), WriteQueue);
+            /*
+            DiscDirectoryInfo[] dirs;
+            lock (Source.FileSystem)
+                dirs = Source.GetDirectories();
+            foreach (DiscDirectoryInfo directory in dirs)
+            {
+                DiscDirectoryInfo dest;
+                lock (Destination.FileSystem)
+                    dest = Destination.FileSystem.GetDirectoryInfo(Path.Combine(Destination.FullName, directory.Name));
+                CopyTree(directory, dest, WriteQueue);
+            }
+            */
+            
         }
 
 
