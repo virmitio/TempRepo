@@ -500,7 +500,7 @@ namespace VMProvisioningAgent
 
         [Parameter] public SwitchParameter Overwrite = false;
 
-        [Parameter] public DiffVHD.ComparisonStyle Comparison = DiffVHD.ComparisonStyle.Journaled;
+        [Parameter] public DiffVHD.ComparisonStyle Comparison = DiffVHD.ComparisonStyle.DateTimeOnly;
 
         // [Parameter]
         // [Alias("Interface")]

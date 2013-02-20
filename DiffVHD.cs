@@ -31,7 +31,7 @@ namespace VMProvisioningAgent
         private const string RootSystemRegistry = @"REGISTRY\\SYSTEM";
         private const string RootUserRegistry = @"REGISTRY\\USERS";
 
-        private static readonly string[] ExcludeFiles = new string[] { @"PAGEFILE.SYS", @"HIBERFIL.SYS", @"SYSTEM VOLUME INFORMATION"};//, @"WINDOWS\SYSTEM32\CONFIG" };
+        private static readonly string[] ExcludeFiles = new string[] { @"PAGEFILE.SYS", @"HIBERFIL.SYS", @"SYSTEM VOLUME INFORMATION\"};//, @"WINDOWS\SYSTEM32\CONFIG" };
         private static readonly string[] SystemRegistryFiles = new string[]
             {
                 String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\BCD-TEMPLATE",RootFiles),
@@ -255,10 +255,13 @@ namespace VMProvisioningAgent
                 WriteQueue.Go().Wait();
 
                 // Now handle registry files (if any)
-                foreach (
-                    var file in
-                        OutFileRoot.GetFiles("*", SearchOption.AllDirectories)
-                                   .Where(dfi => SystemRegistryFiles.Contains(dfi.FullName)))
+                ParallelQuery<DiscFileInfo> Ofiles;
+                lock(OutFileRoot.FileSystem)
+                    Ofiles = OutFileRoot.GetFiles("*.*", SearchOption.AllDirectories).AsParallel();
+                Ofiles = Ofiles.Where(dfi =>
+                                      SystemRegistryFiles.Contains(dfi.FullName, StringComparer.CurrentCultureIgnoreCase));
+
+                foreach (var file in Ofiles)
                 {
                     var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
                     if (!A.Exists)
@@ -276,10 +279,11 @@ namespace VMProvisioningAgent
                     file.Delete(); // remove this file from the set of file to copy and overwrite
                 }
 
-                foreach (
-                    var file in
-                        OutFileRoot.GetFiles("*", SearchOption.AllDirectories)
-                                   .Where(dfi => UserRegisrtyFiles.IsMatch(dfi.FullName)))
+                lock (OutFileRoot.FileSystem)
+                    Ofiles = OutFileRoot.GetFiles("*.*", SearchOption.AllDirectories).AsParallel();
+                Ofiles = Ofiles.Where(dfi => UserRegisrtyFiles.IsMatch(dfi.FullName));
+                
+                foreach (var file in Ofiles)
                 {
                     // Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
                     var match = UserRegisrtyFiles.Match(file.FullName);
@@ -340,26 +344,26 @@ namespace VMProvisioningAgent
             DiscFileSystem Block = B.FileSystem;
             DiscFileSystem Olock = Out.FileSystem;
 
-            DiscFileInfo[] Afiles; 
+            ParallelQuery<DiscFileInfo> Afiles; 
             lock(Alock)
-                Afiles = A.GetFiles();
-            DiscFileInfo[] Btmp;
+                Afiles = A.GetFiles("*.*", SearchOption.AllDirectories).AsParallel();
+            ParallelQuery<DiscFileInfo> BFiles;
             lock(Block)
-                Btmp = B.GetFiles();
-            var BFiles = Btmp.Where(file => !ExcludeFiles.Contains(file.FullName.ToUpperInvariant()) && (!Afiles.Contains(file,
+                BFiles = B.GetFiles("*.*", SearchOption.AllDirectories).AsParallel();
+            BFiles = BFiles.Where(file => !ExcludeFiles.Contains(file.FullName.ToUpperInvariant()) && (!Afiles.Contains(file,
                                                             new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
                                                                                        (a, b) => a.Name.Equals(b.Name),
-                                                                                       d => d.Name.GetHashCode())))).ToArray().AsParallel();
+                                                                                       d => d.Name.GetHashCode())))).AsParallel();
             if (BFiles.Any())
                 try
                 {
                     BFiles =
-                        Btmp.Where(file =>
+                        BFiles.Where(file =>
                             {
-                                DiscFileInfo[] Atmp;
+                                DiscFileInfo Atmp;
                                 lock (Alock)
-                                    Atmp = A.GetFiles(file.Name);
-                                return !CompareFile(Atmp.Any() ? Atmp.Single() : null, file, Style);
+                                    Atmp = Alock.GetFileInfo(file.Name);
+                                return !CompareFile(Atmp, file, Style);
                             }
                             ).ToArray()
                              .AsParallel();
@@ -373,11 +377,12 @@ namespace VMProvisioningAgent
             foreach (var file in BFiles)
             {
                 DiscFileInfo outFile;
-                lock (Out.FileSystem)
-                    outFile = Out.FileSystem.GetFileInfo(Path.Combine(Out.FullName, file.Name));
+                lock (Olock)
+                    outFile = Out.FileSystem.GetFileInfo(Path.Combine(Out.FullName, file.FullName));
                 WriteQueue.Add(file, outFile);
             }
 
+            /*
             DiscDirectoryInfo[] Asubs;
             lock(Alock)
                 Asubs = A.GetDirectories();
@@ -406,6 +411,8 @@ namespace VMProvisioningAgent
                     CopyTree(sub, Oout, WriteQueue);
                 }
             }
+            */
+
             return Task.Factory.StartNew(() => Task.WaitAll(tasks.ToArray()), TaskCreationOptions.AttachedToParent);
         }
 
@@ -419,6 +426,9 @@ namespace VMProvisioningAgent
         private static bool CompareFile(DiscFileInfo A, DiscFileInfo B, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
             if (A == null || B == null) return A == B;
+            lock (A.FileSystem)
+                lock (B.FileSystem)
+                    if (!A.Exists || !B.Exists) return false;
 
             if (Style == ComparisonStyle.Journaled)
                 if (A.FileSystem is NtfsFileSystem)
@@ -447,31 +457,35 @@ namespace VMProvisioningAgent
             byte[] buffA = new byte[BufferSize];
             byte[] buffB = new byte[BufferSize];
 
-            var fileA = A.OpenRead();
-            var fileB = B.OpenRead();
-
-            int numA, numB;
-            while (fileA.Position < fileA.Length)
-            {
-                numA = fileA.Read(buffA, 0, BufferSize);
-                numB = fileB.Read(buffB, 0, BufferSize);
-                if (numA != numB)
+            lock(A.FileSystem)
+                lock (B.FileSystem)
                 {
+                    var fileA = A.OpenRead();
+                    var fileB = B.OpenRead();
+
+                    int numA, numB;
+                    while (fileA.Position < fileA.Length)
+                    {
+                        numA = fileA.Read(buffA, 0, BufferSize);
+                        numB = fileB.Read(buffB, 0, BufferSize);
+                        if (numA != numB)
+                        {
+                            fileA.Close();
+                            fileB.Close();
+                            return false;
+                        }
+                        for (int i = 0; i < numA; i++)
+                            if (buffA[i] != buffB[i])
+                            {
+                                fileA.Close();
+                                fileB.Close();
+                                return false;
+                            }
+                    }
                     fileA.Close();
                     fileB.Close();
-                    return false;
+                    return true;
                 }
-                for (int i = 0; i < numA; i++)
-                    if (buffA[i] != buffB[i])
-                    {
-                        fileA.Close();
-                        fileB.Close();
-                        return false;
-                    }
-            }
-            fileA.Close();
-            fileB.Close();
-            return true;
         }
 
         private static void CopyTree(DiscDirectoryInfo Source, DiscDirectoryInfo Destination, CopyQueue WriteQueue)
@@ -480,7 +494,7 @@ namespace VMProvisioningAgent
 
             DiscFileInfo[] files;
             lock (Source.FileSystem)
-                files = Source.GetFiles("*", SearchOption.AllDirectories);
+                files = Source.GetFiles("*.*", SearchOption.AllDirectories);
             foreach (var file in files)
             {
                 DiscFileInfo DestFile;
