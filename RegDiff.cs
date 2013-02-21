@@ -40,9 +40,10 @@ namespace VMProvisioningAgent
                 string name = data.Key.Substring(tmpIndex + 2);
 
                 if (!data.Value.Same)
-                    Data[path][name] = Side == RegistryComparison.Side.A
-                                           ? new ValueObject(data.Value.TypeA, data.Value.ValueA)
-                                           : new ValueObject(data.Value.TypeB, data.Value.ValueB);
+                    if (Side == RegistryComparison.Side.A && !(data.Value.TypeA == RegistryValueType.None && data.Value.ValueA == null))
+                        Data[path][name] = new ValueObject(data.Value.TypeA, data.Value.ValueA);
+                    else if (!(data.Value.TypeB == RegistryValueType.None && data.Value.ValueB == null)) // Side == B
+                        Data[path][name] = new ValueObject(data.Value.TypeB, data.Value.ValueB);
             }
 
         }
