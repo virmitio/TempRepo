@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using DiscUtils.Registry;
 
 namespace VMProvisioningAgent
@@ -77,10 +78,12 @@ namespace VMProvisioningAgent
 
         public bool DoCompare()
         {
-            return InnerCompare(HiveA.Root, HiveB.Root, @"\", ref _output);
+            var t = InnerCompare(HiveA.Root, HiveB.Root, @"\");
+            t.Wait();
+            return t.Result;
         }
 
-        private static bool InnerCompare(RegistryKey A, RegistryKey B, string root,ref Dictionary<string, Data> output)
+        private Task<bool> InnerCompare(RegistryKey A, RegistryKey B, string root)
         {
             bool current = true;
             try
@@ -93,33 +96,33 @@ namespace VMProvisioningAgent
                         string EntryName = root + A.Name + "::" + Name;
                         var dat = new Data();
                         dat.SetA(A.GetValue(Name), A.GetValueType(Name));
-                        output.Add(EntryName, dat);
+                        _output.Add(EntryName, dat);
                     }
-                    foreach (var keyName in A.GetSubKeyNames())
-                    {
-                        RegistryKey subA = A.OpenSubKey(keyName);
-                        RegistryKey subB = B == null ? null : B.OpenSubKey(keyName);
-                        current &= InnerCompare(subA, subB, root + keyName + @"\", ref output);
-                    }
+                    current = A.GetSubKeyNames().AsParallel().Aggregate(current, (cur, keyName) =>
+                        {
+                            var t = InnerCompare(A.OpenSubKey(keyName), B == null ? null : B.OpenSubKey(keyName),
+                                                 root + keyName + @"\");
+                            t.Wait();
+                            return cur && t.Result;
+                        });
                 }
                 if (B != null)
                 {
                     foreach (var Name in B.GetValueNames())
                     {
                         string EntryName = root + B.Name + "::" + Name;
-                        Data dat = output.ContainsKey(EntryName) ? output[EntryName] : new Data();
+                        Data dat = _output.ContainsKey(EntryName) ? _output[EntryName] : new Data();
                         dat.SetB(B.GetValue(Name), B.GetValueType(Name));
-                        output[EntryName] = dat;
+                        _output[EntryName] = dat;
                     }
-                    foreach (var keyName in B.GetSubKeyNames())
-                    {
-                        // when we get here, we have already cleared everything present in the A side
-                        RegistryKey subB = B.OpenSubKey(keyName);
-                        current &= InnerCompare(null, subB, root + keyName + @"\", ref output);
-                    }
-
+                    current = B.GetSubKeyNames().AsParallel().Aggregate(current, (cur, keyName) =>
+                        {
+                            var t = InnerCompare(null, B.OpenSubKey(keyName), root + keyName + @"\");
+                            t.Wait();
+                            return cur && t.Result;
+                        });
                 }
-                return current;
+                return Task.Factory.StartNew(() => current, TaskCreationOptions.AttachedToParent);
             }
             catch (Exception e)
             {

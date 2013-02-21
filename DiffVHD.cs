@@ -344,36 +344,47 @@ namespace VMProvisioningAgent
             DiscFileSystem Block = B.FileSystem;
             DiscFileSystem Olock = Out.FileSystem;
 
-            ParallelQuery<DiscFileInfo> Afiles; 
+            var testFunc = new Func<DiscFileInfo, string>(dfi => dfi.FullName);
+
+            /*
+            ParallelQuery<string> Afiles; 
             lock(Alock)
-                Afiles = A.GetFiles("*.*", SearchOption.AllDirectories).AsParallel();
+                Afiles = Alock.GetFiles("", "*.*", SearchOption.AllDirectories).ToArray().AsParallel();
+            */
             ParallelQuery<DiscFileInfo> BFiles;
             lock(Block)
-                BFiles = B.GetFiles("*.*", SearchOption.AllDirectories).AsParallel();
-            BFiles = BFiles.Where(file => !ExcludeFiles.Contains(file.FullName.ToUpperInvariant()) && (!Afiles.Contains(file,
-                                                            new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
-                                                                                       (a, b) => a.Name.Equals(b.Name),
-                                                                                       d => d.Name.GetHashCode())))).AsParallel();
-            if (BFiles.Any())
-                try
-                {
-                    BFiles =
-                        BFiles.Where(file =>
-                            {
-                                DiscFileInfo Atmp;
-                                lock (Alock)
-                                    Atmp = Alock.GetFileInfo(file.Name);
-                                return !CompareFile(Atmp, file, Style);
-                            }
-                            ).ToArray()
-                             .AsParallel();
-                }
-                catch (Exception e)
-                {
-                    throw;
-                }
-            //if (BFiles.Any() && !Out.Exists) Out.Create();
+                BFiles = B.GetFiles("*.*", SearchOption.AllDirectories).ToArray().AsParallel();
+            BFiles = BFiles.Where(file =>
+                                  !ExcludeFiles.Contains(file.FullName.ToUpperInvariant())
+                                 ).AsParallel();
+            var BF1 = BFiles.ToArray();
+            var BFN1 = BF1.Select(testFunc).ToArray();
+            /*
+            BFiles = BFiles.Where(file =>
+                                  (!Afiles.Contains(file, new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
+                                                              (a, b) => a.Name.Equals(b.Name),
+                                                              d => d.Name.GetHashCode())))).AsParallel();
+            var BF2 = BFiles.ToArray();
+            var BFN2 = BF2.Select(dfi => dfi.FullName).ToArray();
+            */
 
+            try
+            {
+                BFiles = BFiles.Where(file =>
+                    {
+                        DiscFileInfo Atmp;
+                        lock (Alock)
+                            Atmp = Alock.GetFileInfo(file.FullName);
+                        return !CompareFile(Atmp, file, Style);
+                    }).ToArray().AsParallel();
+            }
+            catch (Exception e)
+            {
+                throw;
+            }
+            var BF2 = BFiles.ToArray();
+            var BFN2 = BF2.Select(testFunc).ToArray();
+            
             foreach (var file in BFiles)
             {
                 DiscFileInfo outFile;
@@ -436,10 +447,20 @@ namespace VMProvisioningAgent
                     lock(A.FileSystem)
                         lock (B.FileSystem)
                         {
-                            var An = A.FileSystem as NtfsFileSystem;
-                            var Bn = (NtfsFileSystem) (B.FileSystem);
-                            return An.GetMasterFileTable()[An.GetFileId(A.FullName)].LogFileSequenceNumber ==
-                                   Bn.GetMasterFileTable()[Bn.GetFileId(B.FullName)].LogFileSequenceNumber;
+                            try
+                            {
+                                var An = A.FileSystem as NtfsFileSystem;
+                                var Bn = (NtfsFileSystem) (B.FileSystem);
+                                long Aid = (long) (An.GetFileId(A.FullName) & 0xffffffffffff);
+                                long Bid = (long) (Bn.GetFileId(B.FullName) & 0xffffffffffff);
+
+                                return An.GetMasterFileTable()[Aid].LogFileSequenceNumber ==
+                                       Bn.GetMasterFileTable()[Bid].LogFileSequenceNumber;
+                            }
+                            catch (Exception e)
+                            { 
+                                throw;
+                            }
                         }
                 }
                 else throw new ArgumentException("Journal comparison only functions on NTFS partitions.", "Style");
