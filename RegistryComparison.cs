@@ -14,18 +14,33 @@ namespace VMProvisioningAgent
 
         public RegistryHive HiveA { get; private set; }
         public RegistryHive HiveB { get; private set; }
+        public Dictionary<string, Data> Output { get; private set; }
+
+        private bool HavePreference = false;
+        private Side Preference;
 
         public RegistryComparison(string HiveFileA, string HiveFileB)
-        {
-            HiveA = new RegistryHive(File.OpenRead(HiveFileA));
-            HiveB = new RegistryHive(File.OpenRead(HiveFileB));
-        }
+            : this(File.OpenRead(HiveFileA), File.OpenRead(HiveFileB))
+        {}
 
         public RegistryComparison(Stream HiveFileA, Stream HiveFileB)
         {
+            Output = new Dictionary<string, Data>();
             HiveA = new RegistryHive(HiveFileA);
             HiveB = new RegistryHive(HiveFileB);
         }
+
+        public RegistryComparison(string HiveFileA, string HiveFileB, Side PreferSide)
+            : this(File.OpenRead(HiveFileA), File.OpenRead(HiveFileB), PreferSide)
+        {}
+
+        public RegistryComparison(Stream HiveFileA, Stream HiveFileB, Side PreferSide)
+            : this(HiveFileA, HiveFileB)
+        {
+            HavePreference = true;
+            Preference = PreferSide;
+        }
+        
 
         public class Data
         {
@@ -72,102 +87,238 @@ namespace VMProvisioningAgent
                 Same = ValueA != null && ValueB != null && (TypeA != TypeB && ValueA.Equals(ValueB));
             }
         }
-
-        private Dictionary<string, Data> _output = new Dictionary<string, Data>();
-        public Dictionary<string, Data> Output { get { return new Dictionary<string, Data>(_output ?? new Dictionary<string, Data>()); } }
-
+        
         public bool DoCompare()
         {
-            var t = InnerCompare(HiveA.Root, HiveB.Root, @"\");
+            var t = HavePreference
+                        ? Preference == Side.A
+                              ? AOnlyInnerCompare(HiveA.Root, HiveB.Root, @"\")
+                              : BOnlyInnerCompare(HiveA.Root, HiveB.Root, @"\")
+                        : InnerCompare(HiveA.Root, HiveB.Root, @"\");
             t.Wait();
             return t.Result;
         }
 
         private Task<bool> InnerCompare(RegistryKey A, RegistryKey B, string root)
         {
-            return Task.Factory.StartNew(() =>
+
+            List<Task<bool>> tasks = new List<Task<bool>>();
+            try
+            {
+                if (A != null)
                 {
-
-                    List<Task<bool>> tasks = new List<Task<bool>>();
-                    try
+                    // Process A
+                    string[] aVals;
+                    lock (HiveA)
+                        aVals = A.GetValueNames();
+                    foreach (var Name in aVals)
                     {
-                        if (A != null)
-                        {
-                            // Process A
-                            string[] aVals;
-                            lock (HiveA)
-                                aVals = A.GetValueNames();
-                            foreach (var Name in aVals)
-                            {
-                                string EntryName;
-                                lock (HiveA)
-                                    EntryName = root + A.Name + "::" + Name;
-                                var dat = new Data();
-                                lock (HiveA)
-                                    dat.SetA(A.GetValue(Name), A.GetValueType(Name));
-                                _output.Add(EntryName, dat);
-                            }
-                            string[] ASubKeys;
-                            lock (HiveA)
-                                ASubKeys = A.GetSubKeyNames();
-                            string[] BSubKeys = new string[0];
-                            if (B != null)
-                                lock (HiveB)
-                                    BSubKeys = B.GetSubKeyNames();
-                            tasks.AddRange(ASubKeys.AsParallel().Select(keyName =>
-                                {
-                                    RegistryKey aSub, bSub;
-                                    lock (HiveA)
-                                        aSub = A.OpenSubKey(keyName);
-                                    lock (HiveB)
-                                        bSub = B == null
-                                                   ? null
-                                                   : BSubKeys.Contains(keyName, StringComparer.CurrentCultureIgnoreCase)
-                                                         ? B.OpenSubKey(keyName)
-                                                         : null;
-                                    return InnerCompare(aSub, bSub, root + keyName + @"\");
-                                }));
-                        }
-                        if (B != null)
-                        {
-                            // Process B
-                            string[] bVals;
-                            lock (HiveB)
-                                bVals = B.GetValueNames();
-
-                            foreach (var Name in bVals)
-                            {
-                                string EntryName;
-                                lock (HiveB)
-                                    EntryName = root + B.Name + "::" + Name;
-                                Data dat = _output.ContainsKey(EntryName) ? _output[EntryName] : new Data();
-                                lock (HiveB)
-                                    dat.SetB(B.GetValue(Name), B.GetValueType(Name));
-                                _output[EntryName] = dat;
-                            }
-                            string[] BSubKeys;
-                            lock (HiveB)
-                                BSubKeys = B.GetSubKeyNames();
-                            tasks.AddRange(BSubKeys.AsParallel().Select(keyName =>
-                                {
-                                    RegistryKey bSub;
-                                    lock (HiveB)
-                                        bSub = B.OpenSubKey(keyName);
-                                    return InnerCompare(null, bSub, root + keyName + @"\");
-                                }));
-                        }
-
-                        return tasks.Aggregate(true, (ret, task) =>
-                            {
-                                task.Wait();
-                                return ret && task.Result;
-                            });
+                        string EntryName;
+                        lock (HiveA)
+                            EntryName = root + A.Name + "::" + Name;
+                        var dat = new Data();
+                        lock (HiveA)
+                            dat.SetA(A.GetValue(Name), A.GetValueType(Name));
+                        Output.Add(EntryName, dat);
                     }
-                    catch (Exception e)
+                    string[] ASubKeys;
+                    lock (HiveA)
+                        ASubKeys = A.GetSubKeyNames();
+                    string[] BSubKeys = new string[0];
+                    if (B != null)
+                        lock (HiveB)
+                            BSubKeys = B.GetSubKeyNames();
+                    tasks.AddRange(ASubKeys.AsParallel().Select(keyName =>
+                        {
+                            RegistryKey aSub, bSub;
+                            lock (HiveA)
+                                aSub = A.OpenSubKey(keyName);
+                            lock (HiveB)
+                                bSub = B == null
+                                           ? null
+                                           : BSubKeys.Contains(keyName, StringComparer.CurrentCultureIgnoreCase)
+                                                 ? B.OpenSubKey(keyName)
+                                                 : null;
+                            return InnerCompare(aSub, bSub, root + keyName + @"\");
+                        }));
+                }
+                if (B != null)
+                {
+                    // Process B
+                    string[] bVals;
+                    lock (HiveB)
+                        bVals = B.GetValueNames();
+
+                    foreach (var Name in bVals)
                     {
-                        throw;
+                        string EntryName;
+                        lock (HiveB)
+                            EntryName = root + B.Name + "::" + Name;
+                        Data dat = Output.ContainsKey(EntryName) ? Output[EntryName] : new Data();
+                        lock (HiveB)
+                            dat.SetB(B.GetValue(Name), B.GetValueType(Name));
+                        Output[EntryName] = dat;
                     }
-                }, TaskCreationOptions.AttachedToParent);
+                    string[] BSubKeys;
+                    lock (HiveB)
+                        BSubKeys = B.GetSubKeyNames();
+                    tasks.AddRange(BSubKeys.AsParallel().Select(keyName =>
+                        {
+                            RegistryKey bSub;
+                            lock (HiveB)
+                                bSub = B.OpenSubKey(keyName);
+                            return InnerCompare(null, bSub, root + keyName + @"\");
+                        }));
+                }
+
+                return Task.Factory.StartNew(() =>
+                                             tasks.Aggregate(true, (ret, task) =>
+                                                 {
+                                                     task.Wait();
+                                                     return ret && task.Result;
+                                                 }), TaskCreationOptions.AttachedToParent);
+            }
+            catch (Exception e)
+            {
+                throw;
+            }
+        }
+
+        private Task<bool> AOnlyInnerCompare(RegistryKey A, RegistryKey B, string root)
+        {
+
+            List<Task<bool>> tasks = new List<Task<bool>>();
+            try
+            {
+                if (A != null)
+                {
+                    // Process A
+                    string[] aVals;
+                    lock (HiveA)
+                        aVals = A.GetValueNames();
+                    string[] bVals = new string[0];
+                    if (B != null)
+                        lock (HiveB)
+                            bVals = B.GetValueNames();
+                    foreach (var Name in aVals)
+                    {
+                        string EntryName;
+                        lock (HiveA)
+                            EntryName = root + A.Name + "::" + Name;
+                        var dat = new Data();
+                        lock (HiveA)
+                            dat.SetA(A.GetValue(Name), A.GetValueType(Name));
+                        if (bVals.Contains(Name, StringComparer.CurrentCultureIgnoreCase))
+                            lock (HiveB)
+                                dat.SetB(B.GetValue(Name), B.GetValueType(Name));
+                        Output.Add(EntryName, dat);
+                    }
+                    string[] ASubKeys;
+                    lock (HiveA)
+                        ASubKeys = A.GetSubKeyNames();
+                    string[] BSubKeys = new string[0];
+                    if (B != null)
+                        lock (HiveB)
+                            BSubKeys = B.GetSubKeyNames();
+                    tasks.AddRange(ASubKeys.AsParallel().Select(keyName =>
+                    {
+                        RegistryKey aSub, bSub;
+                        lock (HiveA)
+                            aSub = A.OpenSubKey(keyName);
+                        lock (HiveB)
+                            bSub = B == null
+                                       ? null
+                                       : BSubKeys.Contains(keyName, StringComparer.CurrentCultureIgnoreCase)
+                                             ? B.OpenSubKey(keyName)
+                                             : null;
+                        return AOnlyInnerCompare(aSub, bSub, root + keyName + @"\");
+                    }));
+                }
+
+                return Task.Factory.StartNew(() =>
+                                             tasks.Aggregate(true, (ret, task) =>
+                                             {
+                                                 task.Wait();
+                                                 return ret && task.Result;
+                                             }), TaskCreationOptions.AttachedToParent);
+            }
+            catch (Exception e)
+            {
+                throw;
+            }
+        }
+
+        private async Task<bool> BOnlyInnerCompare(RegistryKey A, RegistryKey B, string root)
+        {
+
+            List<Task<bool>> tasks = new List<Task<bool>>();
+            List<bool> bools = new List<bool>();
+            try
+            {
+                if (B != null)
+                {
+                    // Process A
+                    string[] bVals;
+                    lock (HiveB)
+                        bVals = B.GetValueNames();
+                    string[] aVals = new string[0];
+                    if (A != null)
+                        lock (HiveA)
+                            aVals = A.GetValueNames();
+                    foreach (var Name in bVals)
+                    {
+                        string EntryName;
+                        lock (HiveB)
+                            EntryName = root + B.Name + "::" + Name;
+                        var dat = new Data();
+                        lock (HiveB)
+                            dat.SetB(B.GetValue(Name), B.GetValueType(Name));
+                        if (aVals.Contains(Name, StringComparer.CurrentCultureIgnoreCase))
+                            lock (HiveA)
+                                dat.SetA(A.GetValue(Name), A.GetValueType(Name));
+                        lock(Output)
+                            Output.Add(EntryName, dat);
+                    }
+                    string[] BSubKeys;
+                    lock (HiveB)
+                        BSubKeys = B.GetSubKeyNames();
+                    string[] ASubKeys = new string[0];
+                    if (A != null)
+                        lock (HiveA)
+                            ASubKeys = A.GetSubKeyNames();
+                    tasks.AddRange(BSubKeys.Select(async keyName => 
+                    {
+                        RegistryKey aSub, bSub;
+                        lock (HiveB)
+                            bSub = B.OpenSubKey(keyName);
+                        lock (HiveA)
+                            aSub = A == null
+                                       ? null
+                                       : ASubKeys.Contains(keyName, StringComparer.CurrentCultureIgnoreCase)
+                                             ? A.OpenSubKey(keyName)
+                                             : null;
+                        return await BOnlyInnerCompare(aSub, bSub, root + keyName + @"\");
+                    }));
+                }
+
+                /*
+                return Task.Factory.StartNew(() =>
+                                             tasks.AsParallel().Aggregate(true, (ret, task) =>
+                                             {
+                                                 task.Wait();
+                                                 return ret && task.Result;
+                                             }), TaskCreationOptions.AttachedToParent);
+                */
+                return tasks.AsParallel().Aggregate(true, (ret, task) =>
+                                             {
+                                                 task.Wait();
+                                                 return ret && task.Result;
+                                             });
+            }
+            catch (Exception e)
+            {
+                throw;
+            }
         }
 
     }

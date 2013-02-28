@@ -32,15 +32,21 @@ namespace VMProvisioningAgent
         private const string RootUserRegistry = @"REGISTRY\\USERS";
 
         private static readonly string[] ExcludeFiles = new string[] { @"PAGEFILE.SYS", @"HIBERFIL.SYS", @"SYSTEM VOLUME INFORMATION\"};//, @"WINDOWS\SYSTEM32\CONFIG" };
+
+        private static readonly Regex[] ExclusionRules = new Regex[]
+            {
+                new Regex(@"^WIN[^\\]*\\SYSTEM32\\CONFIG\\(^DEFAULT&^SOFTWARE&^SYSTEM&^SYSTEMPROFILE\\NTUSER.DAT)$", RegexOptions.ExplicitCapture | RegexOptions.IgnoreCase)
+            };
+
         private static readonly string[] SystemRegistryFiles = new string[]
             {
-                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\BCD-TEMPLATE",RootFiles),
-                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\COMPONENTS",RootFiles),
+//                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\BCD-TEMPLATE",RootFiles),
+//                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\COMPONENTS",RootFiles),
                 String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\DEFAULT",RootFiles),
-                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\DRIVERS",RootFiles),
-                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\FP",RootFiles),
-                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SAM",RootFiles),
-                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SECURITY",RootFiles),
+//                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\DRIVERS",RootFiles),
+//                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\FP",RootFiles),
+//                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SAM",RootFiles),
+//                String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SECURITY",RootFiles),
                 String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SOFTWARE",RootFiles),
                 String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SYSTEM",RootFiles),
                 String.Format(@"{0}\WINDOWS\SYSTEM32\CONFIG\SYSTEMPROFILE\NTUSER.DAT",RootFiles),
@@ -270,12 +276,18 @@ namespace VMProvisioningAgent
                         continue;
                     }
                     //else
-                    var comp = new RegistryComparison(A.OpenRead(), file.OpenRead());
+                    MemoryStream SideA = new MemoryStream();
+                    using (var tmp = A.OpenRead()) tmp.CopyTo(SideA);
+                    MemoryStream SideB = new MemoryStream();
+                    using (var tmp = file.OpenRead()) tmp.CopyTo(SideB);
+                    var comp = new RegistryComparison(SideA, SideB, RegistryComparison.Side.B);
                     comp.DoCompare();
                     var diff = new RegDiff(comp, RegistryComparison.Side.B);
                     var outFile = Output.GetFileInfo(String.Concat(RootSystemRegistry, A.FullName));
-                    diff.WriteToStream(outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew,
-                                                    FileAccess.ReadWrite));
+                    if (!outFile.Directory.Exists)
+                        outFile.Directory.Create();
+                    using (var OUT = outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite))
+                        diff.WriteToStream(OUT);
                     file.Delete(); // remove this file from the set of file to copy and overwrite
                 }
 
@@ -295,13 +307,19 @@ namespace VMProvisioningAgent
                         continue;
                     }
                     //else
-                    var comp = new RegistryComparison(A.OpenRead(), file.OpenRead());
+                    MemoryStream SideA = new MemoryStream();
+                    using (var tmp = A.OpenRead()) tmp.CopyTo(SideA);
+                    MemoryStream SideB = new MemoryStream();
+                    using (var tmp = file.OpenRead()) tmp.CopyTo(SideB);
+                    var comp = new RegistryComparison(SideA, SideB);
                     comp.DoCompare();
                     var diff = new RegDiff(comp, RegistryComparison.Side.B);
                     var outFile =
                         Output.GetFileInfo(Path.Combine(RootUserRegistry, match.Groups["user"].Value, A.FullName));
-                    diff.WriteToStream(outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew,
-                                                    FileAccess.ReadWrite));
+                    if (!outFile.Directory.Exists)
+                        outFile.Directory.Create();
+                    using (var OUT = outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite))
+                        diff.WriteToStream(OUT);
                     file.Delete(); // remove this file from the set of file to copy and overwrite
                 }
             }
@@ -344,7 +362,7 @@ namespace VMProvisioningAgent
             DiscFileSystem Block = B.FileSystem;
             DiscFileSystem Olock = Out.FileSystem;
 
-            var testFunc = new Func<DiscFileInfo, string>(dfi => dfi.FullName);
+//            var testFunc = new Func<DiscFileInfo, string>(dfi => dfi.FullName);
 
             /*
             ParallelQuery<string> Afiles; 
@@ -357,8 +375,9 @@ namespace VMProvisioningAgent
             BFiles = BFiles.Where(file =>
                                   !ExcludeFiles.Contains(file.FullName.ToUpperInvariant())
                                  ).AsParallel();
-            var BF1 = BFiles.ToArray();
-            var BFN1 = BF1.Select(testFunc).ToArray();
+            BFiles = ExclusionRules.Aggregate(BFiles, (current, rule) => current.Where(file => !rule.IsMatch(file.FullName)));
+//            var BF1 = BFiles.ToArray();
+//            var BFN1 = BF1.Select(testFunc).ToArray();
             /*
             BFiles = BFiles.Where(file =>
                                   (!Afiles.Contains(file, new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
@@ -382,8 +401,8 @@ namespace VMProvisioningAgent
             {
                 throw;
             }
-            var BF2 = BFiles.ToArray();
-            var BFN2 = BF2.Select(testFunc).ToArray();
+//            var BF2 = BFiles.ToArray();
+//            var BFN2 = BF2.Select(testFunc).ToArray();
             
             foreach (var file in BFiles)
             {

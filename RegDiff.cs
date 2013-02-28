@@ -23,7 +23,7 @@ namespace VMProvisioningAgent
             }
         }
 
-        private XDictionary<string, XDictionary<string, ValueObject>> Data;
+        private readonly XDictionary<string, XDictionary<string, ValueObject>> Data;
 
         public RegDiff()
         {
@@ -31,8 +31,10 @@ namespace VMProvisioningAgent
         }
 
         public RegDiff(RegistryComparison Source, RegistryComparison.Side Side)
+            : this()
         {
             var origin = Source.Output;
+
             foreach (var data in origin)
             {
                 int tmpIndex = data.Key.IndexOf("::");
@@ -40,7 +42,8 @@ namespace VMProvisioningAgent
                 string name = data.Key.Substring(tmpIndex + 2);
 
                 if (!data.Value.Same)
-                    if (Side == RegistryComparison.Side.A && !(data.Value.TypeA == RegistryValueType.None && data.Value.ValueA == null))
+                    if (Side == RegistryComparison.Side.A &&
+                        !(data.Value.TypeA == RegistryValueType.None && data.Value.ValueA == null))
                         Data[path][name] = new ValueObject(data.Value.TypeA, data.Value.ValueA);
                     else if (!(data.Value.TypeB == RegistryValueType.None && data.Value.ValueB == null)) // Side == B
                         Data[path][name] = new ValueObject(data.Value.TypeB, data.Value.ValueB);
