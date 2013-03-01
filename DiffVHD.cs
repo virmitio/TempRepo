@@ -175,7 +175,7 @@ namespace VMProvisioningAgent
                                      Style);
                         }
                     }
-
+                    
                 } // using (Out)
 
             } // using (Old, New, and OutFS)
@@ -283,7 +283,7 @@ namespace VMProvisioningAgent
                     var comp = new RegistryComparison(SideA, SideB, RegistryComparison.Side.B);
                     comp.DoCompare();
                     var diff = new RegDiff(comp, RegistryComparison.Side.B);
-                    var outFile = Output.GetFileInfo(String.Concat(RootSystemRegistry, A.FullName));
+                    var outFile = Output.GetFileInfo(Path.Combine(RootSystemRegistry, A.FullName));
                     if (!outFile.Directory.Exists)
                         outFile.Directory.Create();
                     using (var OUT = outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite))
@@ -311,7 +311,7 @@ namespace VMProvisioningAgent
                     using (var tmp = A.OpenRead()) tmp.CopyTo(SideA);
                     MemoryStream SideB = new MemoryStream();
                     using (var tmp = file.OpenRead()) tmp.CopyTo(SideB);
-                    var comp = new RegistryComparison(SideA, SideB);
+                    var comp = new RegistryComparison(SideA, SideB, RegistryComparison.Side.B);
                     comp.DoCompare();
                     var diff = new RegDiff(comp, RegistryComparison.Side.B);
                     var outFile =
