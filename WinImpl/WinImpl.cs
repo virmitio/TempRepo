@@ -11,7 +11,7 @@ using VMProvisioningAgent;
 
 namespace WinImpl
 {
-    public class WinImpl : IVMStateEditor
+    internal class WinImpl : IVMStateEditor
     {
         protected const string SysRegPostfix = @"\System32\config";
         protected static readonly List<string> VHDExtensions = new List<string>(new []{"vhd", "vhdx", "avhd", "avhdx"});
@@ -583,7 +583,7 @@ namespace WinImpl
         /// </summary>
         /// <param name="Location">An arbitrary path on the drive to search.</param>
         /// <returns>The root folder of the Windows installation if one is found.  Null otherwise.</returns>
-        public static string DetectWindows(string Location)
+        internal static string DetectWindows(string Location)
         {
             try
             {
@@ -599,7 +599,7 @@ namespace WinImpl
             }
         }
         
-        public string LocateUserRoot(string WindowsRoot)
+        internal string LocateUserRoot(string WindowsRoot)
         {
             bool Status;
             string init = ReadMachineRegistry(out Status, WindowsRoot,
@@ -623,7 +623,7 @@ namespace WinImpl
             return null;
         }
 
-        public static string[] GetMountPoints(string VHD)
+        internal static string[] GetMountPoints(string VHD)
         {
             if (VHD == null)
                 return null;

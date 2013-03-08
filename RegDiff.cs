@@ -10,13 +10,13 @@ using DiscUtils.Registry;
 
 namespace VMProvisioningAgent
 {
-    public class RegDiff
+    internal class RegDiff
     {
-        public class ValueObject
+        internal class ValueObject
         {
-            public RegistryValueType Type { get; private set; }
-            public object Value { get; private set; }
-            public ValueObject(RegistryValueType Kind, object Object)
+            internal RegistryValueType Type { get; private set; }
+            internal object Value { get; private set; }
+            internal ValueObject(RegistryValueType Kind, object Object)
             {
                 Type = Kind;
                 Value = Object;
@@ -25,12 +25,12 @@ namespace VMProvisioningAgent
 
         private readonly XDictionary<string, XDictionary<string, ValueObject>> Data;
 
-        public RegDiff()
+        internal RegDiff()
         {
             Data = new XDictionary<string, XDictionary<string, ValueObject>>();
         }
 
-        public RegDiff(RegistryComparison Source, RegistryComparison.Side Side)
+        internal RegDiff(RegistryComparison Source, RegistryComparison.Side Side)
             : this()
         {
             var origin = Source.Output;
@@ -51,7 +51,7 @@ namespace VMProvisioningAgent
 
         }
 
-        /*        public static RegDiff ReadFromStream(StreamReader Input)
+        /*        internal static RegDiff ReadFromStream(StreamReader Input)
         {
             RegDiff output = new RegDiff();
 
@@ -90,13 +90,13 @@ namespace VMProvisioningAgent
         }
         */
 
-        public static RegDiff ReadFromStream(Stream Input)
+        internal static RegDiff ReadFromStream(Stream Input)
         {
             try { return ReadFromHive(new RegistryHive(Input, DiscUtils.Ownership.None)); }
             catch (Exception e) { return new RegDiff(); }
         }
 
-        public static RegDiff ReadFromHive(RegistryHive Input)
+        internal static RegDiff ReadFromHive(RegistryHive Input)
         {
             var Out = new RegDiff();
             var Root = Input.Root;
@@ -123,7 +123,7 @@ namespace VMProvisioningAgent
             }
         }
 
-        /*        public string Flatten()
+        /*        internal string Flatten()
         {
             if (Data == null)
                 return String.Empty;
@@ -161,7 +161,7 @@ namespace VMProvisioningAgent
         }
         */
 
-        public void WriteToStream(Stream Output)
+        internal void WriteToStream(Stream Output)
         {
             //Output.Write(Flatten());
             RegistryHive Out;
@@ -179,7 +179,7 @@ namespace VMProvisioningAgent
             }
         }
 
-        public bool ApplyTo(RegistryKey Root, Action<string> Log = null)
+        internal bool ApplyTo(RegistryKey Root, Action<string> Log = null)
         {
             if (Root == null)
                 throw new ArgumentNullException("Root");

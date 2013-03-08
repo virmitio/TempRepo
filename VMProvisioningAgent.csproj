@@ -61,7 +61,6 @@
   <ItemGroup>
     <Compile Include="Cdmlets.cs" />
     <Compile Include="DiffVHD.cs" />
-    <Compile Include="FileComparison.cs" />
     <Compile Include="RegDiff.cs" />
     <Compile Include="RegistryComparison.cs" />
     <Compile Include="Utility.cs" />

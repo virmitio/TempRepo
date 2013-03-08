@@ -17,9 +17,9 @@ using DiscUtils.Registry;
 
 namespace VMProvisioningAgent
 {
-    public static class DiffVHD
+    internal static class DiffVHD
     {
-        public enum DiskType
+        internal enum DiskType
         {
             VHD,
             VHDX
@@ -67,7 +67,7 @@ namespace VMProvisioningAgent
         /// <param name="Partition">The 0-indexed partition number to compare from each disk file.</param>
         /// <param name="Style"></param>
         /// <returns></returns>
-        public static void CreateDiff(string OldVHD, string NewVHD, string Output, int? Partition, DiskType OutputType = DiskType.VHD, bool Force = false, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
+        internal static void CreateDiff(string OldVHD, string NewVHD, string Output, int? Partition, DiskType OutputType = DiskType.VHD, bool Force = false, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
             CreateDiff(OldVHD, NewVHD, Output, OutputType, Force, Partition.HasValue ? new Tuple<int, int>(Partition.Value, Partition.Value) : null, Style: Style);
         }
@@ -83,7 +83,7 @@ namespace VMProvisioningAgent
         /// <param name="Partition">An int tuple which declares a specific pair of partitions to compare.  The first value in the tuple will be the 0-indexed partition number from OldVHD to compare against.  The second value of the tuple will be the 0-indexed parition from NewVHD to compare with.</param>
         /// <param name="Style"></param>
         /// <returns></returns>
-        public static void CreateDiff(string OldVHD, string NewVHD, string Output, DiskType OutputType = DiskType.VHD, bool Force = false, Tuple<int, int> Partition = null, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
+        internal static void CreateDiff(string OldVHD, string NewVHD, string Output, DiskType OutputType = DiskType.VHD, bool Force = false, Tuple<int, int> Partition = null, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
             if (File.Exists(Output) && !Force) throw new ArgumentException("Output file already exists.", "Output");
             if (!File.Exists(OldVHD)) throw new ArgumentException("Input file does not exist.", "OldVHD");
@@ -226,110 +226,106 @@ namespace VMProvisioningAgent
 
         private static void DiffPart(DiscFileSystem PartA, DiscFileSystem PartB, DiscFileSystem Output, ComparisonStyle Style = ComparisonStyle.DateTimeOnly, CopyQueue WriteQueue = null)
         {
-            try
+            if (PartA == null) throw new ArgumentNullException("PartA");
+            if (PartB == null) throw new ArgumentNullException("PartB");
+            if (Output == null) throw new ArgumentNullException("Output");
+
+            if (PartA is NtfsFileSystem)
             {
-                if (PartA == null) throw new ArgumentNullException("PartA");
-                if (PartB == null) throw new ArgumentNullException("PartB");
-                if (Output == null) throw new ArgumentNullException("Output");
-
-                if (PartA is NtfsFileSystem)
-                {
-                    ((NtfsFileSystem) PartA).NtfsOptions.HideHiddenFiles = false;
-                    ((NtfsFileSystem) PartA).NtfsOptions.HideSystemFiles = false;
-                }
-                if (PartB is NtfsFileSystem)
-                {
-                    ((NtfsFileSystem) PartB).NtfsOptions.HideHiddenFiles = false;
-                    ((NtfsFileSystem) PartB).NtfsOptions.HideSystemFiles = false;
-                }
-                if (Output is NtfsFileSystem)
-                {
-                    ((NtfsFileSystem) Output).NtfsOptions.HideHiddenFiles = false;
-                    ((NtfsFileSystem) Output).NtfsOptions.HideSystemFiles = false;
-                }
-
-                if (WriteQueue == null) WriteQueue = new CopyQueue();
-
-                var RootA = PartA.Root;
-                var RootB = PartB.Root;
-                var OutRoot = Output.Root;
-                var OutFileRoot = Output.GetDirectoryInfo(RootFiles);
-                if (!OutFileRoot.Exists) OutFileRoot.Create();
-
-                CompareTree(RootA, RootB, OutFileRoot, WriteQueue, Style);
-
-                WriteQueue.Go().Wait();
-
-                // Now handle registry files (if any)
-                ParallelQuery<DiscFileInfo> Ofiles;
-                lock(OutFileRoot.FileSystem)
-                    Ofiles = OutFileRoot.GetFiles("*.*", SearchOption.AllDirectories).AsParallel();
-                Ofiles = Ofiles.Where(dfi =>
-                                      SystemRegistryFiles.Contains(dfi.FullName, StringComparer.CurrentCultureIgnoreCase));
-
-                foreach (var file in Ofiles)
-                {
-                    var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
-                    if (!A.Exists)
-                    {
-                        file.FileSystem.MoveFile(file.FullName, String.Concat(RootSystemRegistry, A.FullName));
-                        continue;
-                    }
-                    //else
-                    MemoryStream SideA = new MemoryStream();
-                    using (var tmp = A.OpenRead()) tmp.CopyTo(SideA);
-                    MemoryStream SideB = new MemoryStream();
-                    using (var tmp = file.OpenRead()) tmp.CopyTo(SideB);
-                    var comp = new RegistryComparison(SideA, SideB, RegistryComparison.Side.B);
-                    comp.DoCompare();
-                    var diff = new RegDiff(comp, RegistryComparison.Side.B);
-                    var outFile = Output.GetFileInfo(Path.Combine(RootSystemRegistry, A.FullName));
-                    if (!outFile.Directory.Exists)
-                        outFile.Directory.Create();
-                    using (var OUT = outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite))
-                        diff.WriteToStream(OUT);
-                    file.Delete(); // remove this file from the set of file to copy and overwrite
-                }
-
-                lock (OutFileRoot.FileSystem)
-                    Ofiles = OutFileRoot.GetFiles("*.*", SearchOption.AllDirectories).AsParallel();
-                Ofiles = Ofiles.Where(dfi => UserRegisrtyFiles.IsMatch(dfi.FullName));
-                
-                foreach (var file in Ofiles)
-                {
-                    // Regex(@"^.*\\(?<parentDir>Documents and Settings|Users)\\(?<user>[^\\]+)\\ntuser.dat$", RegexOptions.IgnoreCase);
-                    var match = UserRegisrtyFiles.Match(file.FullName);
-                    var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
-                    if (!A.Exists)
-                    {
-                        file.FileSystem.MoveFile(file.FullName,
-                                                 Path.Combine(RootUserRegistry, match.Groups["user"].Value, A.Name));
-                        continue;
-                    }
-                    //else
-                    MemoryStream SideA = new MemoryStream();
-                    using (var tmp = A.OpenRead()) tmp.CopyTo(SideA);
-                    MemoryStream SideB = new MemoryStream();
-                    using (var tmp = file.OpenRead()) tmp.CopyTo(SideB);
-                    var comp = new RegistryComparison(SideA, SideB, RegistryComparison.Side.B);
-                    comp.DoCompare();
-                    var diff = new RegDiff(comp, RegistryComparison.Side.B);
-                    var outFile =
-                        Output.GetFileInfo(Path.Combine(RootUserRegistry, match.Groups["user"].Value, A.FullName));
-                    if (!outFile.Directory.Exists)
-                        outFile.Directory.Create();
-                    using (var OUT = outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite))
-                        diff.WriteToStream(OUT);
-                    file.Delete(); // remove this file from the set of file to copy and overwrite
-                }
+                ((NtfsFileSystem) PartA).NtfsOptions.HideHiddenFiles = false;
+                ((NtfsFileSystem) PartA).NtfsOptions.HideSystemFiles = false;
             }
-            catch (InvalidOperationException e)
+            if (PartB is NtfsFileSystem)
             {
-                throw;
+                ((NtfsFileSystem) PartB).NtfsOptions.HideHiddenFiles = false;
+                ((NtfsFileSystem) PartB).NtfsOptions.HideSystemFiles = false;
+            }
+            if (Output is NtfsFileSystem)
+            {
+                ((NtfsFileSystem) Output).NtfsOptions.HideHiddenFiles = false;
+                ((NtfsFileSystem) Output).NtfsOptions.HideSystemFiles = false;
+            }
+
+            if (WriteQueue == null) WriteQueue = new CopyQueue();
+
+            var RootA = PartA.Root;
+            var RootB = PartB.Root;
+            var OutRoot = Output.Root;
+            var OutFileRoot = Output.GetDirectoryInfo(RootFiles);
+            if (!OutFileRoot.Exists) OutFileRoot.Create();
+
+            CompareTree(RootA, RootB, OutFileRoot, WriteQueue, Style);
+
+            WriteQueue.Go();
+
+            // Now handle registry files (if any)
+            ParallelQuery<DiscFileInfo> Ofiles;
+            lock(OutFileRoot.FileSystem)
+                Ofiles = OutFileRoot.GetFiles("*.*", SearchOption.AllDirectories).AsParallel();
+            Ofiles = Ofiles.Where(dfi =>
+                                    SystemRegistryFiles.Contains(dfi.FullName, StringComparer.CurrentCultureIgnoreCase));
+
+            foreach (var file in Ofiles)
+            {
+                var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
+                if (!A.Exists)
+                {
+                    file.FileSystem.MoveFile(file.FullName, String.Concat(RootSystemRegistry, A.FullName));
+                    continue;
+                }
+                //else
+                MemoryStream SideA = new MemoryStream();
+                using (var tmp = A.OpenRead()) tmp.CopyTo(SideA);
+                MemoryStream SideB = new MemoryStream();
+                using (var tmp = file.OpenRead()) tmp.CopyTo(SideB);
+                var comp = new RegistryComparison(SideA, SideB, RegistryComparison.Side.B);
+                comp.DoCompare();
+                var diff = new RegDiff(comp, RegistryComparison.Side.B);
+                var outFile = Output.GetFileInfo(Path.Combine(RootSystemRegistry, file.FullName));
+                if (!outFile.Directory.Exists)
+                {
+                    outFile.Directory.Create();
+                }
+                using (var OUT = outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite))
+                    diff.WriteToStream(OUT);
+                file.Delete(); // remove this file from the set of file to copy and overwrite
+            }
+
+            lock (OutFileRoot.FileSystem)
+                Ofiles = OutFileRoot.GetFiles("*.*", SearchOption.AllDirectories).AsParallel();
+            Ofiles = Ofiles.Where(dfi => UserRegisrtyFiles.IsMatch(dfi.FullName));
+                
+            foreach (var file in Ofiles)
+            {
+                var match = UserRegisrtyFiles.Match(file.FullName);
+                var A = PartA.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
+                if (!A.Exists)
+                {
+                    file.FileSystem.MoveFile(file.FullName,
+                                                Path.Combine(RootUserRegistry, match.Groups["user"].Value, A.Name));
+                    continue;
+                }
+                //else
+                MemoryStream SideA = new MemoryStream();
+                using (var tmp = A.OpenRead()) tmp.CopyTo(SideA);
+                MemoryStream SideB = new MemoryStream();
+                using (var tmp = file.OpenRead()) tmp.CopyTo(SideB);
+                var comp = new RegistryComparison(SideA, SideB, RegistryComparison.Side.B);
+                comp.DoCompare();
+                var diff = new RegDiff(comp, RegistryComparison.Side.B);
+                var outFile =
+                    Output.GetFileInfo(Path.Combine(RootUserRegistry, match.Groups["user"].Value, file.FullName));
+                if (!outFile.Directory.Exists)
+                {
+                    outFile.Directory.Create();
+                }
+                using (var OUT = outFile.Open(outFile.Exists ? FileMode.Truncate : FileMode.CreateNew, FileAccess.ReadWrite))
+                    diff.WriteToStream(OUT);
+                file.Delete(); // remove this file from the set of file to copy and overwrite
             }
         }
 
-        public enum ComparisonStyle
+        internal enum ComparisonStyle
         {
             /// <summary> For each pair of files with same name, perform DateTime compare.  If identical, continue with size and Binary compare. </summary>
             Full,
@@ -343,7 +339,6 @@ namespace VMProvisioningAgent
             Journaled,
         }
         
-        // TODO:  I *Really* need to make this execute thread parallel.
         private static void CompareTree(DiscDirectoryInfo A, DiscDirectoryInfo B, DiscDirectoryInfo Out,
                                         CopyQueue WriteQueue, ComparisonStyle Style = ComparisonStyle.DateTimeOnly)
         {
@@ -362,13 +357,6 @@ namespace VMProvisioningAgent
             DiscFileSystem Block = B.FileSystem;
             DiscFileSystem Olock = Out.FileSystem;
 
-//            var testFunc = new Func<DiscFileInfo, string>(dfi => dfi.FullName);
-
-            /*
-            ParallelQuery<string> Afiles; 
-            lock(Alock)
-                Afiles = Alock.GetFiles("", "*.*", SearchOption.AllDirectories).ToArray().AsParallel();
-            */
             ParallelQuery<DiscFileInfo> BFiles;
             lock(Block)
                 BFiles = B.GetFiles("*.*", SearchOption.AllDirectories).ToArray().AsParallel();
@@ -376,19 +364,7 @@ namespace VMProvisioningAgent
                                   !ExcludeFiles.Contains(file.FullName.ToUpperInvariant())
                                  ).AsParallel();
             BFiles = ExclusionRules.Aggregate(BFiles, (current, rule) => current.Where(file => !rule.IsMatch(file.FullName)));
-//            var BF1 = BFiles.ToArray();
-//            var BFN1 = BF1.Select(testFunc).ToArray();
-            /*
-            BFiles = BFiles.Where(file =>
-                                  (!Afiles.Contains(file, new ClrPlus.Core.Extensions.EqualityComparer<DiscFileInfo>(
-                                                              (a, b) => a.Name.Equals(b.Name),
-                                                              d => d.Name.GetHashCode())))).AsParallel();
-            var BF2 = BFiles.ToArray();
-            var BFN2 = BF2.Select(dfi => dfi.FullName).ToArray();
-            */
 
-            try
-            {
                 BFiles = BFiles.Where(file =>
                     {
                         DiscFileInfo Atmp;
@@ -396,14 +372,7 @@ namespace VMProvisioningAgent
                             Atmp = Alock.GetFileInfo(file.FullName);
                         return !CompareFile(Atmp, file, Style);
                     }).ToArray().AsParallel();
-            }
-            catch (Exception e)
-            {
-                throw;
-            }
-//            var BF2 = BFiles.ToArray();
-//            var BFN2 = BF2.Select(testFunc).ToArray();
-            
+           
             foreach (var file in BFiles)
             {
                 DiscFileInfo outFile;
@@ -411,37 +380,6 @@ namespace VMProvisioningAgent
                     outFile = Out.FileSystem.GetFileInfo(Path.Combine(Out.FullName, file.FullName));
                 WriteQueue.Add(file, outFile);
             }
-
-            /*
-            DiscDirectoryInfo[] Asubs;
-            lock(Alock)
-                Asubs = A.GetDirectories();
-
-            DiscDirectoryInfo[] BSub;
-            lock (Block)
-                BSub = B.GetDirectories();
-            
-            foreach (var subdir in BSub.Where(subdir => !ExcludeFiles.Contains(subdir.FullName.ToUpperInvariant())))
-            {
-                DiscDirectoryInfo sub = subdir;
-                DiscDirectoryInfo Oout;
-                lock (Olock)
-                    Oout = Out.FileSystem.GetDirectoryInfo(Path.Combine(Out.FullName, sub.Name));
-                if (Asubs.Contains(subdir, new ClrPlus.Core.Extensions.EqualityComparer<DiscDirectoryInfo>(
-                                               (a, b) => a.Name.Equals(b.Name),
-                                               d => d.Name.GetHashCode())))
-                {
-                    DiscDirectoryInfo Ain;
-                    lock (Alock)
-                        Ain = A.GetDirectories(sub.Name).Single();
-                    tasks.Add(CompTree(Ain, sub, Oout, WriteQueue, Style));
-                }
-                else
-                {
-                    CopyTree(sub, Oout, WriteQueue);
-                }
-            }
-            */
 
             return Task.Factory.StartNew(() => Task.WaitAll(tasks.ToArray()), TaskCreationOptions.AttachedToParent);
         }
@@ -466,29 +404,31 @@ namespace VMProvisioningAgent
                     lock(A.FileSystem)
                         lock (B.FileSystem)
                         {
-                            try
-                            {
-                                var An = A.FileSystem as NtfsFileSystem;
-                                var Bn = (NtfsFileSystem) (B.FileSystem);
-                                long Aid = (long) (An.GetFileId(A.FullName) & 0xffffffffffff);
-                                long Bid = (long) (Bn.GetFileId(B.FullName) & 0xffffffffffff);
+                            var An = A.FileSystem as NtfsFileSystem;
+                            var Bn = (NtfsFileSystem) (B.FileSystem);
+                            long Aid = (long) (An.GetFileId(A.FullName) & 0x0000ffffffffffff);
+                            long Bid = (long) (Bn.GetFileId(B.FullName) & 0x0000ffffffffffff);
 
-                                return An.GetMasterFileTable()[Aid].LogFileSequenceNumber ==
-                                       Bn.GetMasterFileTable()[Bid].LogFileSequenceNumber;
-                            }
-                            catch (Exception e)
-                            { 
-                                throw;
-                            }
+                            return An.GetMasterFileTable()[Aid].LogFileSequenceNumber ==
+                                   Bn.GetMasterFileTable()[Bid].LogFileSequenceNumber;
                         }
                 }
                 else throw new ArgumentException("Journal comparison only functions on NTFS partitions.", "Style");
 
-            return A.Length == B.Length &&
+            bool LenCheck, WriteCheck;
+            lock (A.FileSystem)
+                lock (B.FileSystem)
+                {
+                    LenCheck = A.Length == B.Length;
+                    WriteCheck = A.LastWriteTimeUtc == B.LastWriteTimeUtc;
+                }
+
+            return LenCheck &&
                    (Style == ComparisonStyle.NameOnly || (Style == ComparisonStyle.BinaryOnly
                                                               ? FilesMatch(A, B)
-                                                              : (A.LastWriteTimeUtc == B.LastWriteTimeUtc &&
-                                                                 (Style == ComparisonStyle.DateTimeOnly || FilesMatch(A, B)))));
+                                                              : (WriteCheck &&
+                                                                 (Style == ComparisonStyle.DateTimeOnly ||
+                                                                  FilesMatch(A, B)))));
         }
 
         private static bool FilesMatch(DiscFileInfo A, DiscFileInfo B)
@@ -528,38 +468,7 @@ namespace VMProvisioningAgent
                 }
         }
 
-        private static void CopyTree(DiscDirectoryInfo Source, DiscDirectoryInfo Destination, CopyQueue WriteQueue)
-        {
-            if (!Source.Exists) throw new ArgumentException("Source directory does not exist.", "Source");
-
-            DiscFileInfo[] files;
-            lock (Source.FileSystem)
-                files = Source.GetFiles("*.*", SearchOption.AllDirectories);
-            foreach (var file in files)
-            {
-                DiscFileInfo DestFile;
-                lock(Destination.FileSystem)
-                    DestFile = Destination.FileSystem.GetFileInfo(Path.Combine(Destination.FullName, file.Name));
-                WriteQueue.Add(file, DestFile);
-            }
-
-            /*
-            DiscDirectoryInfo[] dirs;
-            lock (Source.FileSystem)
-                dirs = Source.GetDirectories();
-            foreach (DiscDirectoryInfo directory in dirs)
-            {
-                DiscDirectoryInfo dest;
-                lock (Destination.FileSystem)
-                    dest = Destination.FileSystem.GetDirectoryInfo(Path.Combine(Destination.FullName, directory.Name));
-                CopyTree(directory, dest, WriteQueue);
-            }
-            */
-            
-        }
-
-
-        public static void ApplyDiff(string BaseVHD, string DiffVHD, string OutVHD = null, bool DifferencingOut = false, Tuple<int, int> Partition = null)
+        internal static void ApplyDiff(string BaseVHD, string DiffVHD, string OutVHD = null, bool DifferencingOut = false, Tuple<int, int> Partition = null)
         {
             var DiffDisk = VirtualDisk.OpenDisk(DiffVHD, FileAccess.Read);
             VirtualDisk OutDisk;
@@ -585,30 +494,35 @@ namespace VMProvisioningAgent
                 OutDisk = VirtualDisk.OpenDisk(OutVHD, FileAccess.ReadWrite);
             }
 
-            if (Partition != null)
-            {
-                var Base = OutDisk.Partitions[Partition.Item1];
-                var Diff = DiffDisk.Partitions[Partition.Item2];
-                ApplyPartDiff(Base, Diff);
-            }
-            else
-            {
-                if (OutDisk.Partitions.Count != DiffDisk.Partitions.Count)
-                    throw new ArgumentException("Input disks do not have the same number of partitions.  To apply the diff for specific partitions on mismatched disks, provide the 'Partition' parameter.");
-                for (int i = 0; i < OutDisk.Partitions.Count; i++)
+            using (DiffDisk)
+            using (OutDisk)
+                if (Partition != null)
                 {
-                    if (OutDisk.Partitions[i].BiosType != DiffDisk.Partitions[i].BiosType)
-                        throw new InvalidFileSystemException(
-                            String.Format(
-                                "Filesystem of partition {0} in '{1}' does not match filesystem type of partition {2} in '{3}'.  Unable to apply diff.",
-                                Partition.Item2, DiffVHD, Partition.Item1, OutVHD));
-                    ApplyPartDiff(OutDisk.Partitions[i], DiffDisk.Partitions[i]);
+                    var Base = OutDisk.Partitions[Partition.Item1];
+                    var Diff = DiffDisk.Partitions[Partition.Item2];
+                    ApplyPartDiff(Base, Diff);
                 }
-            }
+                else
+                {
+                    if (OutDisk.Partitions.Count != DiffDisk.Partitions.Count)
+                        throw new ArgumentException(
+                            "Input disks do not have the same number of partitions.  To apply the diff for specific partitions on mismatched disks, provide the 'Partition' parameter.");
+                    for (int i = 0; i < OutDisk.Partitions.Count; i++)
+                    {
+                        if (OutDisk.Partitions[i].BiosType != DiffDisk.Partitions[i].BiosType)
+                            throw new InvalidFileSystemException(
+                                String.Format(
+                                    "Filesystem of partition {0} in '{1}' does not match filesystem type of partition {0} in '{2}'.  Unable to apply diff.",
+                                    i, DiffVHD, OutVHD));
+                        ApplyPartDiff(OutDisk.Partitions[i], DiffDisk.Partitions[i]);
+                    }
+                }
         }
 
         private static void ApplyPartDiff(PartitionInfo Base, PartitionInfo Diff)
         {
+            CopyQueue queue = new CopyQueue();
+
             var BFS = DetectFileSystem(Base);
             var DFS = DetectFileSystem(Diff);
 
@@ -625,44 +539,69 @@ namespace VMProvisioningAgent
 
             var DRoot = DFS.Root;
 
-            var DFileRoot = DRoot.GetDirectories(RootFiles).Single();
-
-            foreach (var file in DFileRoot.GetFiles("*", SearchOption.AllDirectories))
+            var DFRoots = DRoot.GetDirectories(RootFiles);
+            if (DFRoots.Any())
             {
-                var BFile = BFS.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
-                Stream OutStream;
-                if (BFile.Exists) OutStream = BFile.Open(FileMode.Truncate, FileAccess.ReadWrite);
-                else OutStream = BFile.Create();
-                using (var InStream = file.OpenRead())
-                using (OutStream)
-                    InStream.CopyTo(OutStream);
+                var DFileRoot = DFRoots.Single();
+
+                foreach (var file in DFileRoot.GetFiles("*.*", SearchOption.AllDirectories))
+                {
+                    var BFile = BFS.GetFileInfo(file.FullName.Substring(RootFiles.Length + 1));
+                    queue.Add(file, BFile);
+                    /*
+                    Stream OutStream;
+                    if (BFile.Exists) OutStream = BFile.Open(FileMode.Truncate, FileAccess.ReadWrite);
+                    else
+                    {
+                        if (!BFile.Directory.Exists)
+                            BFile.Directory.Create();
+                        OutStream = BFile.Create();
+                    }
+                    using (var InStream = file.OpenRead())
+                    using (OutStream)
+                        InStream.CopyTo(OutStream);
+                    */
+                }
+                queue.Go();
             }
 
-            var DsysReg = DRoot.GetDirectories(RootSystemRegistry).Single();
-            foreach (var file in DsysReg.GetFiles("*", SearchOption.AllDirectories))
+            var DsysRegs = DRoot.GetDirectories(RootSystemRegistry);
+            if (DsysRegs.Any())
             {
-                var BReg = BFS.GetFileInfo(file.FullName.Substring(RootSystemRegistry.Length + 1));
-                if (!BReg.Exists) file.OpenRead().CopyTo(BReg.Create());
-                else
+                var DsysReg = DsysRegs.Single();
+
+                foreach (var file in DsysReg.GetFiles("*.*", SearchOption.AllDirectories))
                 {
+                    var BReg = BFS.GetFileInfo(file.FullName.Substring(RootSystemRegistry.Length + 1));
+                    if (!BReg.Exists) queue.Add(file, BReg);
+                    else
+                    {
+                        var BHive = new RegistryHive(BReg.Open(FileMode.Open, FileAccess.ReadWrite));
+                        RegDiff.ReadFromStream(file.OpenRead()).ApplyTo(BHive.Root);
+                    }
+                }
+                queue.Go();
+            }
+
+            var DuserRegs = DRoot.GetDirectories(RootUserRegistry);
+            if (DuserRegs.Any())
+            {
+                var DuserReg = DuserRegs.Single();
+                var Bfiles =
+                    BFS.GetFiles(String.Empty, "*.*", SearchOption.AllDirectories)
+                       .Where(str => UserRegisrtyFiles.IsMatch(str))
+                       .ToArray();
+                foreach (var file in DuserReg.GetFiles("*.*", SearchOption.AllDirectories))
+                {
+                    var username = DiffUserRegistry.Match(file.FullName).Groups["user"].Value;
+                    var userFile = Bfiles.Where(str => GetUserRegex(username).IsMatch(str)).ToArray();
+                    if (!userFile.Any()) continue;
+                    var BReg = BFS.GetFileInfo(userFile.Single());
+                    if (!BReg.Exists) continue;
                     var BHive = new RegistryHive(BReg.Open(FileMode.Open, FileAccess.ReadWrite));
                     RegDiff.ReadFromStream(file.OpenRead()).ApplyTo(BHive.Root);
                 }
             }
-
-            var DuserReg = DRoot.GetDirectories(RootUserRegistry).Single();
-            var Bfiles = BFS.GetFiles(String.Empty, "*", SearchOption.AllDirectories).Where(str => UserRegisrtyFiles.IsMatch(str)).ToArray();
-            foreach (var file in DuserReg.GetFiles("*", SearchOption.AllDirectories))
-            {
-                var username = DiffUserRegistry.Match(file.FullName).Groups["user"].Value;
-                var userFile = Bfiles.Where(str => GetUserRegex(username).IsMatch(str)).ToArray();
-                if (!userFile.Any()) continue;
-                var BReg = BFS.GetFileInfo(userFile.Single());
-                if (!BReg.Exists) continue;
-                var BHive = new RegistryHive(BReg.Open(FileMode.Open, FileAccess.ReadWrite));
-                RegDiff.ReadFromStream(file.OpenRead()).ApplyTo(BHive.Root);
-            }
-            
         }
 
         // Extension method to handle partition formatting
@@ -672,7 +611,7 @@ namespace VMProvisioningAgent
             switch (type)
             {
                 case WellKnownPartitionType.WindowsFat:
-                    return DiscUtils.Fat.FatFileSystem.FormatPartition(Disk, PartitionIndex, null);
+                    return FatFileSystem.FormatPartition(Disk, PartitionIndex, null);
                 case WellKnownPartitionType.WindowsNtfs:
                     return NtfsFileSystem.Format(Disk.Partitions[PartitionIndex].Open(), null, Disk.Geometry,
                                                  Disk.Partitions[PartitionIndex].FirstSector,
@@ -689,32 +628,92 @@ namespace VMProvisioningAgent
     internal class CopyQueue
     {
         private XDictionary<DiscFileInfo, DiscFileInfo> _queue;
-        public CopyQueue()
+        internal CopyQueue()
         {
             _queue = new XDictionary<DiscFileInfo, DiscFileInfo>();
         }
-        public void Add(DiscFileInfo Source, DiscFileInfo Destination)
+        internal void Add(DiscFileInfo Source, DiscFileInfo Destination)
         {
             _queue[Destination] = Source;
         }
-        public Task Go()
+        internal void Go()
         {
+            while (_queue.Any())
             lock (this)
             {
-                if (!_queue.Any()) return Task.Factory.StartNew(() => { return; });
+                if (!_queue.Any()) return;
                 var current = _queue.First();
                 if (!current.Key.Directory.Exists)
-                    current.Key.Directory.Create();
+                {
+                    CreateDirectoryTree(current.Value.Directory, current.Key.Directory);
+                }
                 using (Stream src = current.Value.OpenRead())
                 using (Stream dest = current.Key.Exists
                                          ? current.Key.Open(FileMode.Truncate, FileAccess.ReadWrite)
                                          : current.Key.Create())
                     src.CopyTo(dest);
+
+
+                // set the attributes and file timestamps (and ACLs if it's ntfs...)
+                current.Key.Attributes = current.Value.Attributes;
+                if (current.Key.FileSystem is NtfsFileSystem)
+                {
+                    var D = (NtfsFileSystem) current.Key.FileSystem;
+                    var S = (NtfsFileSystem) current.Value.FileSystem;
+                    D.SetSecurity(current.Key.FullName, S.GetSecurity(current.Value.FullName));
+
+                    D.SetFileStandardInformation(current.Key.FullName,
+                                                 S.GetFileStandardInformation(current.Value.FullName));
+                }
+                else
+                {
+                    current.Key.CreationTimeUtc = current.Value.CreationTimeUtc;
+                    current.Key.LastWriteTimeUtc = current.Value.LastWriteTimeUtc;
+                    current.Key.LastAccessTimeUtc = current.Value.LastAccessTimeUtc;
+                }
+
+
                 _queue.Remove(current.Key);
             }
-            return Go();
         }
-        public bool IsEmpty()
+
+        internal static void CreateDirectoryTree(DiscDirectoryInfo source, DiscDirectoryInfo destination)
+        {
+            try
+            {
+                if (source == null) 
+                    throw new ArgumentNullException("source");
+                if (destination == null) 
+                    throw new ArgumentNullException("destination");
+                if (destination.Exists) return;
+                
+                if (!destination.Parent.Exists)
+                    CreateDirectoryTree(source.Parent, destination.Parent);
+
+                destination.Create();
+                destination.Attributes = source.Attributes;
+                if (destination.FileSystem is NtfsFileSystem)
+                {
+                    var D = (NtfsFileSystem) destination.FileSystem;
+                    var S = (NtfsFileSystem) source.FileSystem;
+                    D.SetSecurity(destination.FullName, S.GetSecurity(source.FullName));
+
+                    D.SetFileStandardInformation(destination.FullName, S.GetFileStandardInformation(source.FullName));
+                }
+                else
+                {
+                    destination.CreationTimeUtc = source.CreationTimeUtc;
+                    destination.LastWriteTimeUtc = source.LastWriteTimeUtc;
+                    destination.LastAccessTimeUtc = source.LastAccessTimeUtc;
+                }
+            }
+            catch (Exception e)
+            {
+                throw;
+            }
+        }
+
+        internal bool IsEmpty()
         {
             lock (this)
                 return !_queue.Any();

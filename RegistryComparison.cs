@@ -8,33 +8,33 @@ using DiscUtils.Registry;
 
 namespace VMProvisioningAgent
 {
-    public class RegistryComparison
+    internal class RegistryComparison
     {
-        public enum Side { A, B }
+        internal enum Side { A, B }
 
-        public RegistryHive HiveA { get; private set; }
-        public RegistryHive HiveB { get; private set; }
-        public Dictionary<string, Data> Output { get; private set; }
+        internal RegistryHive HiveA { get; private set; }
+        internal RegistryHive HiveB { get; private set; }
+        internal Dictionary<string, Data> Output { get; private set; }
 
         private bool HavePreference = false;
         private Side Preference;
 
-        public RegistryComparison(string HiveFileA, string HiveFileB)
+        internal RegistryComparison(string HiveFileA, string HiveFileB)
             : this(File.OpenRead(HiveFileA), File.OpenRead(HiveFileB))
         {}
 
-        public RegistryComparison(Stream HiveFileA, Stream HiveFileB)
+        internal RegistryComparison(Stream HiveFileA, Stream HiveFileB)
         {
             Output = new Dictionary<string, Data>();
             HiveA = new RegistryHive(HiveFileA);
             HiveB = new RegistryHive(HiveFileB);
         }
 
-        public RegistryComparison(string HiveFileA, string HiveFileB, Side PreferSide)
+        internal RegistryComparison(string HiveFileA, string HiveFileB, Side PreferSide)
             : this(File.OpenRead(HiveFileA), File.OpenRead(HiveFileB), PreferSide)
         {}
 
-        public RegistryComparison(Stream HiveFileA, Stream HiveFileB, Side PreferSide)
+        internal RegistryComparison(Stream HiveFileA, Stream HiveFileB, Side PreferSide)
             : this(HiveFileA, HiveFileB)
         {
             HavePreference = true;
@@ -42,15 +42,15 @@ namespace VMProvisioningAgent
         }
         
 
-        public class Data
+        internal class Data
         {
-            public RegistryValueType TypeA { get; private set; }
-            public object ValueA { get; private set; }
-            public RegistryValueType TypeB { get; private set; }
-            public object ValueB { get; private set; }
-            public bool Same { get; private set; }
+            internal RegistryValueType TypeA { get; private set; }
+            internal object ValueA { get; private set; }
+            internal RegistryValueType TypeB { get; private set; }
+            internal object ValueB { get; private set; }
+            internal bool Same { get; private set; }
 
-            public Data()
+            internal Data()
             {
                 TypeA = RegistryValueType.None;
                 TypeB = RegistryValueType.None;
@@ -59,7 +59,7 @@ namespace VMProvisioningAgent
                 Same = false;
             }
 
-            public Data(object aVal, RegistryValueType aType, object bVal, RegistryValueType bType)
+            internal Data(object aVal, RegistryValueType aType, object bVal, RegistryValueType bType)
             {
                 TypeA = aType;
                 TypeB = bType;
@@ -68,27 +68,27 @@ namespace VMProvisioningAgent
                 CheckSame();
             }
 
-            public void SetA(object aVal, RegistryValueType aType)
+            internal void SetA(object aVal, RegistryValueType aType)
             {
                 TypeA = aType;
                 ValueA = aVal;
                 CheckSame();
             }
 
-            public void SetB(object bVal, RegistryValueType bType)
+            internal void SetB(object bVal, RegistryValueType bType)
             {
                 TypeA = bType;
                 ValueA = bVal;
                 CheckSame();
             }
 
-            public void CheckSame()
+            internal void CheckSame()
             {
                 Same = ValueA != null && ValueB != null && (TypeA != TypeB && ValueA.Equals(ValueB));
             }
         }
         
-        public bool DoCompare()
+        internal bool DoCompare()
         {
             var t = HavePreference
                         ? Preference == Side.A
